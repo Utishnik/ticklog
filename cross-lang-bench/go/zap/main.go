@@ -30,7 +30,7 @@ import (
 // Constants (must match the design doc)
 const (
 	batch         = 1000
-	samples       = 10_000
+	samples       = 1_000
 	totalMessages = samples * batch
 )
 

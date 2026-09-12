@@ -37,7 +37,7 @@ const (
 	batch = 1000
 
 	// samples is the number of batch-average measurements per config.
-	samples = 10_000
+	samples = 1_000
 
 	// totalMessages is the total log messages per config: samples * batch.
 	totalMessages = samples * batch

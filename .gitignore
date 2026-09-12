@@ -14,7 +14,8 @@ Cargo.lock
 Thumbs.db
 
 # cargo install outputs
-.cargo/
+.cargo/*
+!.cargo/config.toml
 
 # Miri cache
 .cache/

@@ -117,3 +117,7 @@ path = "examples/sinks/logroller.rs"
 [[example]]
 name = "sink_stderr"
 path = "examples/sinks/stderr.rs"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
