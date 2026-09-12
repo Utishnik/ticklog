@@ -44,7 +44,7 @@ const (
 )
 
 // threadCounts to benchmark.
-var threadCounts = []int{1, 2, 4}
+var threadCounts = []int{1, 2, 4, 8, 16}
 
 // Workload
 type workload int

@@ -153,7 +153,7 @@ if [[ -n "$CPU_CORE" && -n "$DRAIN_CORE" ]]; then
     # Restore single-core pinning for inline loggers
     PIN_PREFIX="taskset -c $CPU_CORE"
 else
-    run_one "ticklog" "rust/ticklog/target/release/ticklog-cross-lang-harness" "--threads 1,2,4"
+    run_one "ticklog" "rust/ticklog/target/release/ticklog-cross-lang-harness" "--threads 1,2,4,8,16"
 fi
 
 run_one "zerolog"  "bin/zerolog_harness"

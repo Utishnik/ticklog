@@ -33,7 +33,7 @@
 static constexpr int BATCH = 1000;
 static constexpr int SAMPLES = 1'000;
 static constexpr uint64_t TOTAL_MESSAGES = static_cast<uint64_t>(SAMPLES) * BATCH;
-static constexpr int THREAD_COUNTS[] = {1, 2, 4};
+static constexpr int THREAD_COUNTS[] = {1, 2, 4, 8, 16};
 
 // -- Platform counter ---------------------------------------------------
 

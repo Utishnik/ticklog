@@ -94,22 +94,24 @@ def throughput_table(data, thread_count):
 
 def scaling_table(data):
     """Return a markdown table of throughput scaling across thread counts."""
-    header = ["Candidate", "1 thread", "2 threads", "4 threads", "scale 1->4"]
+    header_counts = sorted({r["threads"] for r in next(iter(data.values()))["results"]})
+
     rows = []
     for name in sorted(data):
         d = data[name]
-        # Aggregate throughput across all workloads for each thread count.
         tps = {}
         for r in d["results"]:
             tps.setdefault(r["threads"], 0)
             tps[r["threads"]] += r["throughput"]
 
-        t1 = tps.get(1, 0)
-        t2 = tps.get(2, 0)
-        t4 = tps.get(4, 0)
-        scale = f"{t4 / t1:.2f}x" if t1 > 0 else "-"
+        counts = sorted(tps)
+        t1 = tps.get(counts[0], 0)
+        tlast = tps.get(counts[-1], 0)
+        scale = f"{tlast / t1:.2f}x" if t1 > 0 else "-"
+        row = [name] + [f"{tps[c]:,}" for c in counts] + [scale]
+        rows.append(row)
 
-        rows.append([name, f"{t1:,}", f"{t2:,}", f"{t4:,}", scale])
+    header = ["Candidate"] + [f"{c} thread{'s' if c != 1 else ''}" for c in header_counts] + [f"scale 1->{header_counts[-1] if header_counts else '-'}"]
 
     widths = [max(len(row[i]) for row in [header] + rows) for i in range(len(header))]
     fmt = "| " + " | ".join(f"{{:<{w}}}" for w in widths) + " |"
@@ -189,7 +191,7 @@ def main():
     print("")
 
     workloads = ["single_int", "mixed", "string"]
-    thread_counts = [1, 2, 4]
+    thread_counts = [1, 2, 4, 8, 16]
 
     # Latency tables
     print("## Latency\n")
