@@ -62,7 +62,7 @@ pub fn dispatch(
         let timestamp = timestamp::raw_timestamp();
         let flags = record::FLAG_FORMAT | record::FLAG_SOURCE | record::FLAG_THREAD;
 
-        #[cfg(not(feature = "backend-ringbuffer"))]
+        #[cfg(not(feature = "fifo-backend"))]
         {
             if let Some(slot) = tb.ring.reserve(total_size, policy) {
                 record::assemble(
@@ -83,7 +83,7 @@ pub fn dispatch(
             }
         }
 
-        #[cfg(feature = "backend-ringbuffer")]
+        #[cfg(feature = "fifo-backend")]
         {
             // Stage the record in the thread's scratch buffer, then commit it
             // to the ringbuffer-crate FIFO in one atomic mutex section. The

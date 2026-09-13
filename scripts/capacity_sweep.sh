@@ -76,7 +76,9 @@ run_cell() {
         "$build" "$backend" "$cap" "$THREADS" "$RECORDS" "$REPS" "$median_ns" "$median_rps"
 }
 
-for spec in "custom:" "ringbuffer:--features backend-ringbuffer"; do
+for spec in "custom:" "ringbuffer:--features backend-ringbuffer" \
+            "ringbuf:--features backend-ringbuf" \
+            "triple-buffer:--features backend-triple-buffer"; do
     build="${spec%%:*}"
     features="${spec#*:}"
     echo -n "building $build backend ... "

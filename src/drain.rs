@@ -15,7 +15,7 @@ use crate::record::{
     LOG_RECORD, VERSION,
 };
 use crate::ring::RingBuffer;
-#[cfg(not(feature = "backend-ringbuffer"))]
+#[cfg(not(feature = "fifo-backend"))]
 use crate::ring::{SLOT_SIZE, align_up};
 use crate::sink::LogSink;
 use crate::thread_buf::REGISTRY;
@@ -428,7 +428,7 @@ impl Drain {
 /// run both from the poll loop (over live rings) and from `sync_rings` (a final
 /// drain of a dead ring before it is dropped). `staging` is unused: the custom
 /// ring stores slot-aligned records in its own memory.
-#[cfg(not(feature = "backend-ringbuffer"))]
+#[cfg(not(feature = "fifo-backend"))]
 fn drain_ring(
     ring: &RingBuffer,
     _staging: &mut Vec<u8>,
@@ -535,7 +535,7 @@ fn drain_ring(
 ///
 /// The drain holds no lock while decoding, so the producer never blocks on
 /// sink I/O: `pop_available` releases the FIFO mutex before formatting.
-#[cfg(feature = "backend-ringbuffer")]
+#[cfg(feature = "fifo-backend")]
 fn drain_ring(
     ring: &RingBuffer,
     staging: &mut Vec<u8>,
@@ -1020,7 +1020,7 @@ mod tests {
 
     /// Writes `bytes` into a ring at `offset` and advances `head` by
     /// `align_up(len, SLOT_SIZE)` to mimic the producer.
-    #[cfg(not(feature = "backend-ringbuffer"))]
+    #[cfg(not(feature = "fifo-backend"))]
     fn place_record(ring: &RingBuffer, offset: u64, bytes: &[u8]) {
         // SAFETY: single-threaded test with exclusive access to the ring data.
         let data =
@@ -1288,7 +1288,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "backend-ringbuffer"))]
+    #[cfg(not(feature = "fifo-backend"))]
     fn poll_one_record_accepts_and_advances_tail() {
         let (mut drain, calls) = capture_drain();
         let ring = Arc::new(RingBuffer::new());
@@ -1323,7 +1323,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "backend-ringbuffer"))]
+    #[cfg(not(feature = "fifo-backend"))]
     fn poll_discards_corrupt_record_and_resyncs_to_head() {
         let (mut drain, calls) = capture_drain();
         let ring = Arc::new(RingBuffer::new());
@@ -1356,7 +1356,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "backend-ringbuffer"))]
+    #[cfg(not(feature = "fifo-backend"))]
     fn poll_skips_end_of_buffer_record() {
         let (mut drain, calls) = capture_drain();
         let ring = Arc::new(RingBuffer::new());
@@ -1383,7 +1383,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "backend-ringbuffer"))]
+    #[cfg(not(feature = "fifo-backend"))]
     fn poll_multiple_records_in_one_ring() {
         let (mut drain, calls) = capture_drain();
         let ring = Arc::new(RingBuffer::new());
@@ -1469,7 +1469,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "backend-ringbuffer"))]
+    #[cfg(not(feature = "fifo-backend"))]
     fn sync_drains_dead_ring_before_dropping_it() {
         init_registry();
         let (mut drain, calls) = capture_drain();
@@ -1509,7 +1509,7 @@ mod tests {
     ///   MIRIFLAGS="-Zmiri-tree-borrows" \
     ///     cargo +nightly miri test --lib producer_and_drain_concurrent
     #[test]
-    #[cfg(not(feature = "backend-ringbuffer"))]
+    #[cfg(not(feature = "fifo-backend"))]
     fn producer_and_drain_concurrent_no_aliasing_ub() {
         use crate::builder::Backpressure;
         use std::sync::Barrier;
@@ -1583,7 +1583,7 @@ mod tests {
 
     /// Pushes a fully assembled record into a FIFO ring like the producer
     /// macro path does (reserve, then commit the byte stream).
-    #[cfg(feature = "backend-ringbuffer")]
+    #[cfg(feature = "fifo-backend")]
     fn push_record(ring: &RingBuffer, bytes: &[u8]) {
         use crate::builder::Backpressure;
         let slot = ring.reserve(bytes.len(), Backpressure::Drop).unwrap();
@@ -1592,7 +1592,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "backend-ringbuffer")]
+    #[cfg(feature = "fifo-backend")]
     fn fifo_drain_formats_complete_records() {
         let (mut drain, calls) = capture_drain();
         let ring = Arc::new(RingBuffer::new());
@@ -1625,7 +1625,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "backend-ringbuffer")]
+    #[cfg(all(feature = "fifo-backend", not(feature = "backend-triple-buffer")))]
     fn fifo_drain_passes_whole_records_atomically() {
         // The producer commits each record under the FIFO mutex, and the drain
         // pops under the same mutex, so the drain always observes whole
@@ -1651,6 +1651,38 @@ mod tests {
         drop(recorded);
 
         // Ring is empty and a re-poll finds nothing.
+        assert!(!drain.poll_once(&mut staging, &mut buf));
+        assert!(ring.is_empty());
+    }
+
+    /// The `backend-triple-buffer` exchange has exactly one slot. `commit`
+    /// bypassing the reserve rendezvous overwrites an outstanding value, and
+    /// `commit` is the draft this test drives directly (through this
+    /// interface). So the drain sees at most one, latest record.
+    #[test]
+    #[cfg(feature = "backend-triple-buffer")]
+    fn triple_buffer_drain_delivers_latest_record_only() {
+        let (mut drain, calls) = capture_drain();
+        let ring = Arc::new(RingBuffer::new());
+        drain.rings.push(Arc::clone(&ring));
+
+        let r1 = build_record(Level::Info, 0, "one", Some(("", 0)), 1, None, &[]);
+        let r2 = build_record(Level::Warn, 0, "two", Some(("", 0)), 1, None, &[]);
+
+        // Two commits without a consumed slot in between: r2 overwrites r1.
+        ring.commit(&r1);
+        ring.commit(&r2);
+
+        let mut staging = Vec::new();
+        let mut buf = Vec::new();
+        assert!(drain.poll_once(&mut staging, &mut buf));
+
+        let recorded = calls.lock().unwrap();
+        assert_eq!(recorded.len(), 1, "got {recorded:?}");
+        assert_eq!(recorded[0].1, Level::Warn); // only the latest survives
+        drop(recorded);
+
+        // A re-poll finds nothing further.
         assert!(!drain.poll_once(&mut staging, &mut buf));
         assert!(ring.is_empty());
     }

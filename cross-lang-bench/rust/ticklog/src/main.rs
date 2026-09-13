@@ -318,6 +318,7 @@ fn parse_args() -> Config {
     let mut backend_core = None;
     let mut ring_capacity = None;
     let mut sink_file = None;
+    let mut candidate_override = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -381,12 +382,20 @@ fn parse_args() -> Config {
                 }
                 sink_file = Some(PathBuf::from(&args[i]));
             }
+            "--candidate" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("error: --candidate requires a value");
+                    process::exit(1);
+                }
+                candidate_override = Some(args[i].clone());
+            }
             other => {
                 eprintln!("error: unknown flag '{}'", other);
                 eprintln!(
                     "usage: harness --ns-per-tick <float> --output <path.json> \
                      [--threads <n,...>] [--producer-core <n>] [--backend-core <n>] [--ring-capacity <bytes>] \
-                     [--sink-file <path>]"
+                     [--sink-file <path>] [--candidate <name>]"
                 );
                 process::exit(1);
             }
@@ -404,11 +413,13 @@ fn parse_args() -> Config {
         producer_core,
         backend_core,
         ring_capacity: ring_capacity.unwrap_or(ticklog::__private::DEFAULT_RING_SIZE),
-        candidate_name: if sink_file.is_some() {
-            "ticklog_file".to_string()
-        } else {
-            "ticklog".to_string()
-        },
+        candidate_name: candidate_override.unwrap_or_else(|| {
+            if sink_file.is_some() {
+                "ticklog_file".to_string()
+            } else {
+                "ticklog".to_string()
+            }
+        }),
         sink_file,
     }
 }

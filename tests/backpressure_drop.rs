@@ -74,7 +74,12 @@ fn seq_of(line: &str) -> Option<usize> {
     line.rsplit("seq=").next()?.trim().parse().ok()
 }
 
+/// `backend-triple-buffer` deliberately degrades `Drop` to `Block` (a
+/// single-slot exchange has no capacity to drop into), so the "never blocks"
+/// premise of this test does not hold for it; `backpressure_block.rs` covers
+/// that backend's behaviour instead.
 #[test]
+#[cfg(not(feature = "backend-triple-buffer"))]
 fn drop_policy_discards_newest_records_and_never_blocks() {
     let lines = Arc::new(Mutex::new(Vec::new()));
     let gate = Arc::new(Gate::new());

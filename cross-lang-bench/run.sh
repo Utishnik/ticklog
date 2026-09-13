@@ -148,12 +148,20 @@ run_one() {
 if [[ -n "$CPU_CORE" && -n "$DRAIN_CORE" ]]; then
     # Two-core placement for ticklog: producer on CPU_CORE, drain on DRAIN_CORE
     PIN_PREFIX="taskset -c $CPU_CORE,$DRAIN_CORE"
-    run_one "ticklog" "rust/ticklog/target/release/ticklog-cross-lang-harness" \
+    run_one "ticklog" "bin/ticklog_harness" \
         "--producer-core $CPU_CORE --backend-core $DRAIN_CORE"
+    run_one "ticklog_ringbuf" "bin/ticklog_ringbuf_harness" \
+        "--candidate ticklog_ringbuf --producer-core $CPU_CORE --backend-core $DRAIN_CORE"
+    run_one "ticklog_triple-buffer" "bin/ticklog_triple_buffer_harness" \
+        "--candidate 'ticklog_triple-buffer' --producer-core $CPU_CORE --backend-core $DRAIN_CORE"
     # Restore single-core pinning for inline loggers
     PIN_PREFIX="taskset -c $CPU_CORE"
 else
-    run_one "ticklog" "rust/ticklog/target/release/ticklog-cross-lang-harness" "--threads 1,2,4,8,16"
+    run_one "ticklog" "bin/ticklog_harness" "--threads 1,2,4,8,16"
+    run_one "ticklog_ringbuf" "bin/ticklog_ringbuf_harness" \
+        "--candidate ticklog_ringbuf --threads 1,2,4,8,16"
+    run_one "ticklog_triple-buffer" "bin/ticklog_triple_buffer_harness" \
+        "--candidate 'ticklog_triple-buffer' --threads 1,2,4,8,16"
 fi
 
 run_one "zerolog"  "bin/zerolog_harness"

@@ -99,12 +99,20 @@
 //! - `ring_capacity`: per-thread ring buffer size in bytes. Must be a power of
 //!   two. Defaults to 1 MiB.
 //!
-//! # Experimental backend
+//! # Experimental backends
 //!
-//! With the `backend-ringbuffer` Cargo feature, the crate-local zero-copy ring
-//! is replaced by an experimental byte FIFO built on the `ringbuffer` crate.
-//! The `ring_capacity` key works the same either way; see
-//! [`crate::ring`] for details on the trade-offs.
+//! The crate-local zero-copy ring can be swapped for one of three experimental
+//! single-thread (SPSC) backends, each behind a mutually exclusive Cargo
+//! feature:
+//!
+//! - `backend-ringbuffer`: a byte FIFO built on the `ringbuffer` crate.
+//! - `backend-ringbuf`: a byte FIFO built on the lock-free `ringbuf` crate
+//!   (split producer/consumer halves, no shared hot-path lock).
+//! - `backend-triple-buffer`: a **lossy latest-value exchange** built on the
+//!   `triple_buffer` crate — published-only-only semantics, benchmark-only.
+//!
+//! The `ring_capacity` key works the same for every backend; see
+//! [`crate::ring`] for the trade-offs.
 //!
 //! # Sinks
 //!
@@ -153,6 +161,10 @@
 mod affinity;
 #[cfg(feature = "backend-ringbuffer")]
 mod ringbuffer_backend;
+#[cfg(feature = "backend-ringbuf")]
+mod ringbuf_backend;
+#[cfg(feature = "backend-triple-buffer")]
+mod triple_buffer_backend;
 mod builder;
 mod drain;
 mod encode;

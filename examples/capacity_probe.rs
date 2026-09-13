@@ -21,6 +21,8 @@
 //! ```text
 //! cargo run --release --example capacity_probe -- 262144 16 300000        # custom ring, 256 KiB
 //! cargo run --release --example capacity_probe --features backend-ringbuffer -- 262144 16 300000
+//! cargo run --release --example capacity_probe --features backend-ringbuf -- 262144 16 300000
+//! cargo run --release --example capacity_probe --features backend-triple-buffer -- 262144 16 300000
 //! ```
 //!
 //! Output is one CSV line: `backend,capacity,threads,records,elapsed_ms,ns_per_log,recs_per_sec`.
@@ -34,7 +36,19 @@ use ticklog::{Backpressure, Level, info, warm_up};
 
 #[cfg(feature = "backend-ringbuffer")]
 const BACKEND: &str = "ringbuffer";
-#[cfg(not(feature = "backend-ringbuffer"))]
+#[cfg(all(feature = "backend-ringbuf", not(feature = "backend-ringbuffer")))]
+const BACKEND: &str = "ringbuf";
+#[cfg(all(
+    feature = "backend-triple-buffer",
+    not(feature = "backend-ringbuffer"),
+    not(feature = "backend-ringbuf")
+))]
+const BACKEND: &str = "triple-buffer";
+#[cfg(not(any(
+    feature = "backend-ringbuffer",
+    feature = "backend-ringbuf",
+    feature = "backend-triple-buffer"
+)))]
 const BACKEND: &str = "custom";
 
 fn parse<T: std::str::FromStr>(args: &[String], i: usize, default: T) -> T {

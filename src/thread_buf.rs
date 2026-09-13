@@ -26,8 +26,8 @@ pub(crate) struct ThreadBuf {
     /// Encoded wire size of the thread section for this thread.
     pub(crate) thread_section_size: u16,
     /// Reusable staging buffer for backend-record byte pushes. Only the
-    /// `backend-ringbuffer` backend writes records this way.
-    #[cfg(feature = "backend-ringbuffer")]
+    /// experimental FIFO backends write records this way.
+    #[cfg(feature = "fifo-backend")]
     pub(crate) staging: Vec<u8>,
 }
 
@@ -171,7 +171,7 @@ where
                 thread_id: get_stable_thread_id(),
                 thread_name,
                 thread_section_size,
-                #[cfg(feature = "backend-ringbuffer")]
+                #[cfg(feature = "fifo-backend")]
                 staging: Vec::with_capacity(1024),
             });
         }
@@ -242,7 +242,7 @@ mod tests {
             thread_id: 42,
             thread_name: "test-thread".into(),
             thread_section_size: (THREAD_SECTION_BASE_SIZE + "test-thread".len()) as u16,
-            #[cfg(feature = "backend-ringbuffer")]
+            #[cfg(feature = "fifo-backend")]
             staging: Vec::new(),
         };
         assert_eq!(tb.thread_id, 42);
@@ -262,7 +262,7 @@ mod tests {
             thread_id: 1,
             thread_name: "t".into(),
             thread_section_size: THREAD_SECTION_BASE_SIZE as u16,
-            #[cfg(feature = "backend-ringbuffer")]
+            #[cfg(feature = "fifo-backend")]
             staging: Vec::new(),
         };
         assert!(ring.live.load(Ordering::Relaxed));
@@ -279,7 +279,7 @@ mod tests {
             thread_id: 1,
             thread_name: "t".into(),
             thread_section_size: THREAD_SECTION_BASE_SIZE as u16,
-            #[cfg(feature = "backend-ringbuffer")]
+            #[cfg(feature = "fifo-backend")]
             staging: Vec::new(),
         };
         drop(tb);

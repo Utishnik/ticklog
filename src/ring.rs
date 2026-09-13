@@ -6,11 +6,14 @@
 //!   control fields are padded to separate cache lines with
 //!   [`crossbeam_utils::CachePadded`]. The producer writes records straight
 //!   into raw ring memory.
-//! - **Experimental** (`crate::ringbuffer_backend`), enabled with the
-//!   `backend-ringbuffer` feature: a byte FIFO built on the `ringbuffer` crate.
+//! - **Experimental** byte-FIFO backends, enabled by the mutually exclusive
+//!   features `backend-ringbuffer` (the `ringbuffer` crate), `backend-ringbuf`
+//!   (the `ringbuf` crate) and `backend-triple-buffer` (the `triple_buffer`
+//!   crate — a lossy latest-value exchange, benchmark-only).
 //!
-//! Both support the same per-ring capacity, configured through the
-//! `ring_capacity` key of [`crate::configure!`].
+//! The default backend and the three experimental ones share the same
+//! per-ring capacity, configured through the `ring_capacity` key of
+//! [`crate::configure!`].
 
 /// Default ring capacity in bytes. Power of two so producer and drain can use
 /// a bitmask for index math. Used when [`crate::configure!`] does not specify
@@ -41,9 +44,9 @@ pub(crate) const SLOT_SIZE: usize = CACHE_LINE_SIZE;
 /// at least the requested size; `head` is the value to store (with Release
 /// ordering) after the caller has written the record bytes.
 ///
-/// The `backend-ringbuffer` backend constructs a dummy reservation: it has no
-/// raw memory to expose, so the producer never dereferences `ptr` under that
-/// feature (the write path stages the record and pushes it through the
+/// The experimental FIFO backends construct a dummy reservation: they have no
+/// raw memory to expose, so the producer never dereferences `ptr` under those
+/// features (the write path stages the record and pushes it through the
 /// backend's own commit step instead).
 #[allow(dead_code)] // fields are read only by the custom backend / macros
 pub(crate) struct Reservation {
@@ -59,7 +62,7 @@ pub(crate) const fn align_up(n: u64, align: u64) -> u64 {
     n.wrapping_add(align - 1) & !(align - 1)
 }
 
-#[cfg(not(feature = "backend-ringbuffer"))]
+#[cfg(not(feature = "fifo-backend"))]
 mod custom {
     //! The default zero-copy SPSC ring.
     //!
@@ -698,9 +701,23 @@ mod custom {
     }
 }
 
+// The backends are mutually exclusive features; if more than one is enabled
+// the first in this order wins, so the re-export never collides.
 #[cfg(feature = "backend-ringbuffer")]
 pub(crate) use crate::ringbuffer_backend::RingBuffer;
-#[cfg(not(feature = "backend-ringbuffer"))]
+#[cfg(all(feature = "backend-ringbuf", not(feature = "backend-ringbuffer")))]
+pub(crate) use crate::ringbuf_backend::RingBuffer;
+#[cfg(all(
+    feature = "backend-triple-buffer",
+    not(feature = "backend-ringbuffer"),
+    not(feature = "backend-ringbuf")
+))]
+pub(crate) use crate::triple_buffer_backend::RingBuffer;
+#[cfg(not(any(
+    feature = "backend-ringbuffer",
+    feature = "backend-ringbuf",
+    feature = "backend-triple-buffer"
+)))]
 pub(crate) use custom::RingBuffer;
 
 #[cfg(test)]

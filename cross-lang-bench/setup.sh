@@ -47,11 +47,26 @@ echo "  done -> calibrate"
 
 # -- Rust: ticklog ------------------------------------------------------
 
-echo "=== Building rust/ticklog ==="
+echo "=== Building rust/ticklog (default custom ring) ==="
 cd rust/ticklog
 cargo build --release 2>&1
+cp target/release/ticklog-cross-lang-harness "$SCRIPT_DIR/bin/ticklog_harness"
 cd "$SCRIPT_DIR"
-echo "  done -> rust/ticklog/target/release/ticklog-cross-lang-harness"
+echo "  done -> bin/ticklog_harness"
+
+echo "=== Building rust/ticklog (backend-ringbuf) ==="
+cd rust/ticklog
+cargo build --release --features backend-ringbuf 2>&1
+cp target/release/ticklog-cross-lang-harness "$SCRIPT_DIR/bin/ticklog_ringbuf_harness"
+cd "$SCRIPT_DIR"
+echo "  done -> bin/ticklog_ringbuf_harness"
+
+echo "=== Building rust/ticklog (backend-triple-buffer) ==="
+cd rust/ticklog
+cargo build --release --features backend-triple-buffer 2>&1
+cp target/release/ticklog-cross-lang-harness "$SCRIPT_DIR/bin/ticklog_triple_buffer_harness"
+cd "$SCRIPT_DIR"
+echo "  done -> bin/ticklog_triple_buffer_harness"
 
 # -- Go: zerolog + zap --------------------------------------------------
 
@@ -118,7 +133,9 @@ echo "=== All builds complete ==="
 echo ""
 echo "Binaries:"
 echo "  ./calibrate"
-echo "  rust/ticklog/target/release/ticklog-cross-lang-harness"
+echo "  bin/ticklog_harness"
+echo "  bin/ticklog_ringbuf_harness"
+echo "  bin/ticklog_triple_buffer_harness"
 echo "  bin/zerolog_harness"
 echo "  bin/zap_harness"
 echo "  cpp/quill/build/quill_harness"
