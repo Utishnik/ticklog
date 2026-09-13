@@ -69,19 +69,45 @@ Per-call latency (p50). Lower is better.
 
 Run with `cargo bench --bench latency_vs_baseline` (ticklog) and `cargo bench --bench latency_vs_<logger>` (others).
 
+### Sustained Throughput
+
+End-to-end wall clock (encoding + drain + formatting) divided by records, median of 5 runs: 16 threads × 300k records each into a null sink, `Backpressure::Block`, per-thread ring. Lower is better.
+
+| Ring capacity | custom ring | ringbuffer crate |
+| ------------- | ----------: | ---------------: |
+| 64 KiB        |      581 ns |           775 ns |
+| 256 KiB       |      559 ns |           753 ns |
+| 1 MiB         |      585 ns |           736 ns |
+| 4 MiB         |      537 ns |           612 ns |
+| 16 MiB        |      479 ns |           552 ns |
+
+If the ring is large enough to hold a whole batch (64 MiB), the sustained cost drops to ~30 ns with no backpressure stalls. Reproduce with `examples/capacity_probe.rs` or `scripts/capacity_sweep.sh`.
+
 ### Cross-Language Comparison
 
-Granite Rapids bare metal, identical protocol (BATCH=1000, RDTSC). All numbers p50, single thread.
+Shared VM (16 vCPU, no core isolation), identical protocol (BATCH=1000, RDTSC), p50. Single thread:
 
-| Logger      | Language |    one_u64 |    one_str |      mixed |
-| ----------- | -------- | ---------: | ---------: | ---------: |
-| nanolog     | C++      |     7.6 ns |     7.6 ns |     7.7 ns |
-| **ticklog** | **Rust** | **7.6 ns** | **7.8 ns** | **8.4 ns** |
-| quill       | C++      |     7.7 ns |    10.0 ns |     9.9 ns |
-| zerolog     | Go       |    56.8 ns |    60.6 ns |   114.0 ns |
-| zap         | Go       |   286.3 ns |   296.2 ns |   391.3 ns |
+| Logger      | Language | single_int |      string |      mixed |
+| ----------- | -------- | ---------: | ----------: | ---------: |
+| nanolog     | C++      |     15.6 ns |      15.8 ns |     17.0 ns |
+| **ticklog** | **Rust** | **21.3 ns** | **21.3 ns** | **22.4 ns** |
+| quill       | C++      |     20.3 ns |         --  |        --  |
+| zerolog     | Go       |     94.4 ns |      92.8 ns |    208.3 ns |
+| zap         | Go       |    603.2 ns |     598.0 ns |    790.0 ns |
 
-Reproduce: `cd cross-lang-bench && ./setup.sh && ./run.sh --cpu <n> --drain-cpu <m> --no-perf`. See [cross-lang-bench](cross-lang-bench/) for details.
+Throughput, 4 threads (in millions of records/s, single_int):
+
+| Logger      | rec/s |
+| ----------- | ----: |
+| **ticklog** | **114.9M** |
+| nanolog     | 55.2M      |
+| quill       | 19.3M      |
+| zerolog     | 26.6M      |
+| zap         | 4.0M       |
+
+Ring capacity barely changes ticklog's per-call latency; throughput peaks at 64 KiB–256 KiB rings (86–103M rec/s at 4 threads). Full tables including p95/p99/max, thread scaling, and the ring-capacity sweep are in [cross-lang-bench/BENCHMARKS.md](cross-lang-bench/BENCHMARKS.md).
+
+Reproduce: `cd cross-lang-bench && ./setup.sh && ./run.sh --no-perf`. See [cross-lang-bench](cross-lang-bench/) for details.
 
 ## Configuration
 

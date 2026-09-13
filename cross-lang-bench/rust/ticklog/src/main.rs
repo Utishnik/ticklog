@@ -259,6 +259,8 @@ struct Config {
     producer_core: Option<usize>,
     /// Core for the ticklog drain thread. `None` leaves it unpinned.
     backend_core: Option<usize>,
+    /// Per-thread ring buffer capacity in bytes (power of two).
+    ring_capacity: usize,
 }
 
 /// Parse a comma-separated core/thread list such as "1,2,4" into a Vec.
@@ -287,6 +289,7 @@ fn parse_args() -> Config {
     let mut thread_counts = None;
     let mut producer_core = None;
     let mut backend_core = None;
+    let mut ring_capacity = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -334,11 +337,19 @@ fn parse_args() -> Config {
                 }
                 backend_core = Some(parse_usize(&args[i], "--backend-core"));
             }
+            "--ring-capacity" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("error: --ring-capacity requires a value");
+                    process::exit(1);
+                }
+                ring_capacity = Some(parse_usize(&args[i], "--ring-capacity"));
+            }
             other => {
                 eprintln!("error: unknown flag '{}'", other);
                 eprintln!(
                     "usage: harness --ns-per-tick <float> --output <path.json> \
-                     [--threads <n,...>] [--producer-core <n>] [--backend-core <n>]"
+                     [--threads <n,...>] [--producer-core <n>] [--backend-core <n>] [--ring-capacity <bytes>]"
                 );
                 process::exit(1);
             }
@@ -355,6 +366,7 @@ fn parse_args() -> Config {
         thread_counts: thread_counts.unwrap_or_else(|| vec![1]),
         producer_core,
         backend_core,
+        ring_capacity: ring_capacity.unwrap_or(ticklog::__private::DEFAULT_RING_SIZE),
     }
 }
 
@@ -395,6 +407,7 @@ fn main() {
         sink: NullSink,
         max_level: Level::Trace,
         drain_affinity: drain_affinity,
+        ring_capacity: cfg.ring_capacity,
     }
     .expect("ticklog build");
     std::mem::forget(guard);
