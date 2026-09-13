@@ -12,6 +12,7 @@ tables suitable for a README or design document.
 """
 
 import json
+import os
 import sys
 
 
@@ -101,14 +102,14 @@ def scaling_table(data):
         d = data[name]
         tps = {}
         for r in d["results"]:
-            tps.setdefault(r["threads"], 0)
-            tps[r["threads"]] += r["throughput"]
+            tps.setdefault(r["threads"], {}).setdefault(r["workload"], 0)
+            tps[r["threads"]][r["workload"]] += r["throughput"]
 
         counts = sorted(tps)
-        t1 = tps.get(counts[0], 0)
-        tlast = tps.get(counts[-1], 0)
+        t1 = tps.get(counts[0], {}).get("single_int", 0)
+        tlast = tps.get(counts[-1], {}).get("single_int", 0)
         scale = f"{tlast / t1:.2f}x" if t1 > 0 else "-"
-        row = [name] + [f"{tps[c]:,}" for c in counts] + [scale]
+        row = [name] + [f"{tps[c].get('single_int', 0):,}" for c in counts] + [scale]
         rows.append(row)
 
     header = ["Candidate"] + [f"{c} thread{'s' if c != 1 else ''}" for c in header_counts] + [f"scale 1->{header_counts[-1] if header_counts else '-'}"]
@@ -168,6 +169,66 @@ def jitter_table(data):
     return "\n".join(lines)
 
 
+def ring_capacity_section(data, paths):
+    """Ticklog ring-capacity sweep (single_int) vs nanolog/quill for reference."""
+    cap_files = {}
+    for p in paths:
+        with open(p) as f:
+            d = json.load(f)
+        if d["candidate"] == "ticklog" and p.endswith(".json"):
+            stem = os.path.basename(p).replace(".json", "")
+            if stem.startswith("ticklog_"):
+                try:
+                    cap_files[int(stem.split("_")[1])] = d
+                except (IndexError, ValueError):
+                    pass
+    if not cap_files:
+        return ""
+
+    caps = sorted(cap_files)
+    lines = [
+        "## Ring Capacity (ticklog vs others, single_int)\n",
+        "The ticklog harness accepts `--ring-capacity <bytes>` (default 1 MiB). Same\n",
+        "protocol as above: BATCH=1000, 10M messages per config.\n",
+        "",
+        "### Latency p50 (ns)",
+    ]
+    header = ["Threads"] + [f"{c // 1024}K" if c >= 1024 else f"{c}B" for c in caps] + ["nanolog", "quill"]
+    # nanolog / quill share results/ dir; look them up in data.
+    ref = {name: data[name] for name in ("nanolog", "quill") if name in data}
+    widths = [max(len(h), len(str(c))) for c, h in zip([0] + caps, header)]  # placeholder fmt
+    lines.append("| " + " | ".join(header) + " |")
+    lines.append("|---|" + "---|" * (len(caps) + 2))
+    for th in [1, 2, 4, 8, 16]:
+        cells = [str(th)]
+        for c in caps:
+            r = next((r for r in cap_files[c]["results"]
+                      if r["workload"] == "single_int" and r["threads"] == th), None)
+            cells.append(f'{r["p50"]:.1f}' if r else "-")
+        for name in ("nanolog", "quill"):
+            r = next((r for r in ref.get(name, {"results": []})["results"]
+                      if r["workload"] == "single_int" and r["threads"] == th), None)
+            cells.append(f'{r["p50"]:.1f}' if r else "-")
+        lines.append("| " + " | ".join(cells) + " |")
+
+    lines += ["", "### Throughput (rec/s)"]
+    lines.append("| " + " | ".join(["Threads"] + [f"{c // 1024}K" if c >= 1024 else f"{c}B" for c in caps] + ["nanolog", "quill"]) + " |")
+    lines.append("|---|" + "---|" * (len(caps) + 2))
+    for th in [1, 2, 4, 8, 16]:
+        cells = [str(th)]
+        for c in caps:
+            r = next((r for r in cap_files[c]["results"]
+                      if r["workload"] == "single_int" and r["threads"] == th), None)
+            cells.append(f'{r["throughput"] / 1e6:.1f}M' if r else "-")
+        for name in ("nanolog", "quill"):
+            r = next((r for r in ref.get(name, {"results": []})["results"]
+                      if r["workload"] == "single_int" and r["threads"] == th), None)
+            cells.append(f'{r["throughput"] / 1e6:.1f}M' if r else "-")
+        lines.append("| " + " | ".join(cells) + " |")
+
+    return "\n".join(lines)
+
+
 def main():
     if len(sys.argv) < 2:
         print(f"usage: {sys.argv[0]} results/*.json", file=sys.stderr)
@@ -220,10 +281,18 @@ def main():
     print(jitter_table(data))
     print("")
 
+    # Ring capacity
+    cap = ring_capacity_section(data, sys.argv[1:])
+    if cap:
+        print(cap)
+        print("")
+
     # Notes
     print("## Notes\n")
-    print("- macOS results are best-effort (no core isolation, no frequency locking).")
-    print("- Go and C++ harnesses self-calibrate via CNTFRQ_EL0 due to SDK-linkage differences.")
+    print("- Numbers are best-effort on an unisolated 16-vCPU WSL2 box (no perf/core isolation).")
+    print("  Quill's 8/16-thread runs massively inflate SPSC queues and crashed the VM several")
+    print("  times; treat its high-thread numbers as lower bounds.")
+    print("- Go and C++ harnesses self-calibrate via CNTFRQ_EL0/rdtsc due to SDK-linkage differences.")
     print("- Quill single_int format (\"x={}\") is slower than simple \"{}\"; real fmt behavior.")
     print("- Canonical numbers require Linux x86_64 with `perf stat` and core isolation.")
 

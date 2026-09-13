@@ -20,7 +20,7 @@ use ticklog::{info, Level, LogSink};
 const BATCH: usize = 1000;
 
 /// Number of batch-average samples per (workload, thread_count) config.
-const SAMPLES: usize = 1_000;
+const SAMPLES: usize = 10_000;
 
 /// Total log messages per config: SAMPLES * BATCH.
 const TOTAL_MESSAGES: u64 = (SAMPLES * BATCH) as u64;

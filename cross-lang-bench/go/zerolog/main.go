@@ -37,7 +37,7 @@ const (
 	batch = 1000
 
 	// samples is the number of batch-average measurements per config.
-	samples = 1_000
+	samples = 10_000
 
 	// totalMessages is the total log messages per config: samples * batch.
 	totalMessages = samples * batch
@@ -271,7 +271,7 @@ func main() {
 
 	// Match GOMAXPROCS to the maximum thread count we will test so
 	// that LockOSThread goroutines land on distinct OS threads.
-	runtime.GOMAXPROCS(4)
+	runtime.GOMAXPROCS(16)
 
 	var results []configResult
 

@@ -89,23 +89,26 @@ Shared VM (16 vCPU, no core isolation), identical protocol (BATCH=1000, RDTSC), 
 
 | Logger      | Language | single_int |      string |      mixed |
 | ----------- | -------- | ---------: | ----------: | ---------: |
-| nanolog     | C++      |     15.6 ns |      15.8 ns |     17.0 ns |
-| **ticklog** | **Rust** | **21.3 ns** | **21.3 ns** | **22.4 ns** |
-| quill       | C++      |     20.3 ns |         --  |        --  |
-| zerolog     | Go       |     94.4 ns |      92.8 ns |    208.3 ns |
-| zap         | Go       |    603.2 ns |     598.0 ns |    790.0 ns |
+| nanolog     | C++      |     16.5 ns |      16.6 ns |     16.1 ns |
+| **ticklog** | **Rust** | **21.0 ns** | **21.4 ns** | **22.2 ns** |
+| quill       | C++      |     20.4 ns |         --  |        --  |
+| zerolog     | Go       |     94.4 ns |      92.8 ns |    207.2 ns |
+| zap         | Go       |    590.4 ns |     583.7 ns |    765.9 ns |
 
 Throughput, 4 threads (in millions of records/s, single_int):
 
 | Logger      | rec/s |
 | ----------- | ----: |
-| **ticklog** | **114.9M** |
-| nanolog     | 55.2M      |
-| quill       | 19.3M      |
-| zerolog     | 26.6M      |
-| zap         | 4.0M       |
+| **ticklog** | **110.0M** |
+| nanolog     | 57.0M      |
+| quill       | 18.3M      |
+| zerolog     | 24.1M      |
+| zap         | 4.2M       |
 
-Ring capacity barely changes ticklog's per-call latency; throughput peaks at 64 KiB–256 KiB rings (86–103M rec/s at 4 threads). Full tables including p95/p99/max, thread scaling, and the ring-capacity sweep are in [cross-lang-bench/BENCHMARKS.md](cross-lang-bench/BENCHMARKS.md).
+ticklog scales to 208.6M rec/s at 16 threads (6.2x vs 1 thread); nanolog,
+zerolog, and quill stop scaling past 4-8 threads (single backend consumer).
+Full tables including p95/p99/max, 1-16 thread latency, thread scaling, and the
+ring-capacity sweep are in [cross-lang-bench/BENCHMARKS.md](cross-lang-bench/BENCHMARKS.md).
 
 Reproduce: `cd cross-lang-bench && ./setup.sh && ./run.sh --no-perf`. See [cross-lang-bench](cross-lang-bench/) for details.
 
