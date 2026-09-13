@@ -22,6 +22,13 @@ def load_results(paths):
     for p in paths:
         with open(p) as f:
             d = json.load(f)
+        # Capacity-sweep files (ticklog_65536.json, ...) share the candidate
+        # name "ticklog" with the canonical default-config file. Prefer the
+        # file whose basename matches the candidate so tables always show the
+        # default ring config, never a sweep run.
+        stem = os.path.basename(p).replace(".json", "")
+        if d["candidate"] in data and stem != d["candidate"]:
+            continue
         data[d["candidate"]] = d
     return data
 
@@ -229,6 +236,64 @@ def ring_capacity_section(data, paths):
     return "\n".join(lines)
 
 
+def file_sink_section(data, paths):
+    """ticklog null sink vs FileSink vs nanolog (single_int)."""
+    sources = {}
+    for p in paths:
+        base = os.path.basename(p).replace(".json", "")
+        if base == "ticklog":
+            sources["ticklog"] = p
+        elif base == "ticklog_file":
+            sources["ticklog_file"] = p
+        elif base == "nanolog":
+            sources["nanolog"] = p
+
+    if not set(("ticklog", "ticklog_file", "nanolog")) <= set(sources):
+        return ""
+
+    loaded = {name: json.load(open(p)) for name, p in sources.items()}
+    names = ("ticklog", "ticklog_file", "nanolog")
+    lines = [
+        "## File Sink (ticklog null vs file, single_int)\n",
+        "The ticklog harness accepts `--sink-file <path>`: the drain formats every",
+        "record and writes it through a buffered `FileSink` (`BufWriter`, 64 KiB)",
+        "instead of discarding lines in a null sink. Same protocol as above:",
+        "BATCH=1000, 10M messages per config. nanolog writes to its own log file on",
+        "one background thread for reference (8/16-thread runs on this box).\n",
+        "### Throughput (rec/s)\n",
+    ]
+
+    thr_counts = [1, 2, 4, 8, 16]
+    lines.append("| " + " | ".join(["Threads"] + list(names)) + " |")
+    lines.append("|---|" + "---|" * len(names))
+    for th in thr_counts:
+        cells = [str(th)]
+        for name in names:
+            r = next(
+                (r for r in loaded[name]["results"]
+                 if r["workload"] == "single_int" and r["threads"] == th),
+                None,
+            )
+            cells.append(f'{r["throughput"] / 1e6:.1f}M' if r else "-")
+        lines.append("| " + " | ".join(cells) + " |")
+
+    lines += ["", "### Latency p50 (ns)"]
+    lines.append("| " + " | ".join(["Threads"] + list(names)) + " |")
+    lines.append("|---|" + "---|" * len(names))
+    for th in thr_counts:
+        cells = [str(th)]
+        for name in names:
+            r = next(
+                (r for r in loaded[name]["results"]
+                 if r["workload"] == "single_int" and r["threads"] == th),
+                None,
+            )
+            cells.append(f'{r["p50"]:.1f}' if r else "-")
+        lines.append("| " + " | ".join(cells) + " |")
+
+    return "\n".join(lines)
+
+
 def main():
     if len(sys.argv) < 2:
         print(f"usage: {sys.argv[0]} results/*.json", file=sys.stderr)
@@ -287,6 +352,12 @@ def main():
         print(cap)
         print("")
 
+    # File sink vs null sink
+    fs = file_sink_section(data, sys.argv[1:])
+    if fs:
+        print(fs)
+        print("")
+
     # Notes
     print("## Notes\n")
     print("- Numbers are best-effort on an unisolated 16-vCPU WSL2 box (no perf/core isolation).")
@@ -295,6 +366,9 @@ def main():
     print("- Go and C++ harnesses self-calibrate via CNTFRQ_EL0/rdtsc due to SDK-linkage differences.")
     print("- Quill single_int format (\"x={}\") is slower than simple \"{}\"; real fmt behavior.")
     print("- Canonical numbers require Linux x86_64 with `perf stat` and core isolation.")
+    print("- `ticklog_file` uses `--sink-file`: the drain writes formatted lines to a real")
+    print("  file (`BufWriter`, 64 KiB). The harness measure wall time around producers;")
+    print("  file writes land in page cache on the same host as nanolog's log file.")
 
 
 if __name__ == "__main__":

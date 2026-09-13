@@ -13,7 +13,7 @@ use std::process;
 use std::sync::{Arc, Barrier};
 use std::thread;
 use serde::Serialize;
-use ticklog::{info, Level, LogSink};
+use ticklog::{info, FileSink, Level, LogSink};
 
 // Constants (must match the design doc)
 /// Number of log calls between counter reads.
@@ -91,6 +91,28 @@ struct NullSink;
 impl LogSink for NullSink {
     fn accept(&mut self, _line: &[u8], _level: Level) -> io::Result<()> {
         Ok(())
+    }
+}
+
+// Sink selection: null by default, real file with --sink-file.
+enum BenchSink {
+    Null(NullSink),
+    File(FileSink),
+}
+
+impl LogSink for BenchSink {
+    fn accept(&mut self, line: &[u8], level: Level) -> io::Result<()> {
+        match self {
+            BenchSink::Null(s) => s.accept(line, level),
+            BenchSink::File(s) => s.accept(line, level),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            BenchSink::Null(s) => s.flush(),
+            BenchSink::File(s) => s.flush(),
+        }
     }
 }
 
@@ -261,6 +283,11 @@ struct Config {
     backend_core: Option<usize>,
     /// Per-thread ring buffer capacity in bytes (power of two).
     ring_capacity: usize,
+    /// Path of a sink file. When set, ticklog writes formatted lines to this
+    /// file (truncated) instead of discarding them in a null sink.
+    sink_file: Option<PathBuf>,
+    /// Report name in the JSON output ("ticklog" or "ticklog_file").
+    candidate_name: String,
 }
 
 /// Parse a comma-separated core/thread list such as "1,2,4" into a Vec.
@@ -290,6 +317,7 @@ fn parse_args() -> Config {
     let mut producer_core = None;
     let mut backend_core = None;
     let mut ring_capacity = None;
+    let mut sink_file = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -345,11 +373,20 @@ fn parse_args() -> Config {
                 }
                 ring_capacity = Some(parse_usize(&args[i], "--ring-capacity"));
             }
+            "--sink-file" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("error: --sink-file requires a path");
+                    process::exit(1);
+                }
+                sink_file = Some(PathBuf::from(&args[i]));
+            }
             other => {
                 eprintln!("error: unknown flag '{}'", other);
                 eprintln!(
                     "usage: harness --ns-per-tick <float> --output <path.json> \
-                     [--threads <n,...>] [--producer-core <n>] [--backend-core <n>] [--ring-capacity <bytes>]"
+                     [--threads <n,...>] [--producer-core <n>] [--backend-core <n>] [--ring-capacity <bytes>] \
+                     [--sink-file <path>]"
                 );
                 process::exit(1);
             }
@@ -367,6 +404,12 @@ fn parse_args() -> Config {
         producer_core,
         backend_core,
         ring_capacity: ring_capacity.unwrap_or(ticklog::__private::DEFAULT_RING_SIZE),
+        candidate_name: if sink_file.is_some() {
+            "ticklog_file".to_string()
+        } else {
+            "ticklog".to_string()
+        },
+        sink_file,
     }
 }
 
@@ -400,11 +443,16 @@ struct Output {
 fn main() {
     let cfg = parse_args();
 
-    // Init ticklog once with a null sink. The Guard is intentionally
-    // leaked so the drain runs for the lifetime of the process.
+    // Init ticklog once. The sink is a null sink by default, or a truncated
+    // file when --sink-file is given. The Guard is intentionally leaked so
+    // the drain runs for the lifetime of the process.
     let drain_affinity = cfg.backend_core.map(|c| vec![c]);
+    let sink = match &cfg.sink_file {
+        Some(path) => BenchSink::File(FileSink::truncate(path).expect("ticklog build")),
+        None => BenchSink::Null(NullSink),
+    };
     let guard = ticklog::configure! {
-        sink: NullSink,
+        sink: sink,
         max_level: Level::Trace,
         drain_affinity: drain_affinity,
         ring_capacity: cfg.ring_capacity,
@@ -434,7 +482,7 @@ fn main() {
     };
 
     let output = Output {
-        candidate: "ticklog".to_string(),
+        candidate: cfg.candidate_name,
         os: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
         clock: clock_name.to_string(),

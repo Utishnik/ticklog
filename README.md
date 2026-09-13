@@ -90,7 +90,7 @@ Shared VM (16 vCPU, no core isolation), identical protocol (BATCH=1000, RDTSC), 
 | Logger      | Language | single_int |      string |      mixed |
 | ----------- | -------- | ---------: | ----------: | ---------: |
 | nanolog     | C++      |     16.5 ns |      16.6 ns |     16.1 ns |
-| **ticklog** | **Rust** | **21.0 ns** | **21.4 ns** | **22.2 ns** |
+| **ticklog** | **Rust** | **21.6 ns** | **21.3 ns** | **22.2 ns** |
 | quill       | C++      |     20.4 ns |         --  |        --  |
 | zerolog     | Go       |     94.4 ns |      92.8 ns |    207.2 ns |
 | zap         | Go       |    590.4 ns |     583.7 ns |    765.9 ns |
@@ -99,16 +99,20 @@ Throughput, 4 threads (in millions of records/s, single_int):
 
 | Logger      | rec/s |
 | ----------- | ----: |
-| **ticklog** | **110.0M** |
+| **ticklog** | **103.2M** |
 | nanolog     | 57.0M      |
 | quill       | 18.3M      |
 | zerolog     | 24.1M      |
 | zap         | 4.2M       |
 
-ticklog scales to 208.6M rec/s at 16 threads (6.2x vs 1 thread); nanolog,
+ticklog scales to ~200M rec/s at 16 threads (6x vs 1 thread); nanolog,
 zerolog, and quill stop scaling past 4-8 threads (single backend consumer).
-Full tables including p95/p99/max, 1-16 thread latency, thread scaling, and the
-ring-capacity sweep are in [cross-lang-bench/BENCHMARKS.md](cross-lang-bench/BENCHMARKS.md).
+Writing to a real file instead of a null sink (`--sink-file`) does not move
+call-site latency and keeps the 16-thread throughput at ~200M (vs nanolog's
+23.9M), because file I/O stays on the background drain thread.
+Full tables including p95/p99/max, 1-16 thread latency, thread scaling, the
+ring-capacity sweep, and the null-sink vs file-sink comparison are in
+[cross-lang-bench/BENCHMARKS.md](cross-lang-bench/BENCHMARKS.md).
 
 Reproduce: `cd cross-lang-bench && ./setup.sh && ./run.sh --no-perf`. See [cross-lang-bench](cross-lang-bench/) for details.
 
