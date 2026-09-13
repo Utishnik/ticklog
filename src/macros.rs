@@ -59,24 +59,56 @@ pub fn dispatch(
             return;
         }
 
-        if let Some(slot) = tb.ring.reserve(total_size, policy) {
-            let timestamp = timestamp::raw_timestamp();
-            let flags = record::FLAG_FORMAT | record::FLAG_SOURCE | record::FLAG_THREAD;
-            record::assemble(
-                slot.ptr,
-                level,
-                timestamp,
-                flags,
-                fmt,
-                file,
-                line,
-                tb.thread_id,
-                &tb.thread_name,
-                n_args,
-                total_size,
-                write_args,
-            );
-            tb.ring.publish(slot);
+        let timestamp = timestamp::raw_timestamp();
+        let flags = record::FLAG_FORMAT | record::FLAG_SOURCE | record::FLAG_THREAD;
+
+        #[cfg(not(feature = "backend-ringbuffer"))]
+        {
+            if let Some(slot) = tb.ring.reserve(total_size, policy) {
+                record::assemble(
+                    slot.ptr,
+                    level,
+                    timestamp,
+                    flags,
+                    fmt,
+                    file,
+                    line,
+                    tb.thread_id,
+                    &tb.thread_name,
+                    n_args,
+                    total_size,
+                    write_args,
+                );
+                tb.ring.publish(slot);
+            }
+        }
+
+        #[cfg(feature = "backend-ringbuffer")]
+        {
+            // Stage the record in the thread's scratch buffer, then commit it
+            // to the ringbuffer-crate FIFO in one atomic mutex section. The
+            // mutex makes the whole record visible to the drain at once.
+            if let Some(slot) = tb.ring.reserve(total_size, policy) {
+                let staging = &mut tb.staging;
+                staging.clear();
+                staging.resize(total_size, 0);
+                record::assemble(
+                    staging.as_mut_ptr(),
+                    level,
+                    timestamp,
+                    flags,
+                    fmt,
+                    file,
+                    line,
+                    tb.thread_id,
+                    &tb.thread_name,
+                    n_args,
+                    total_size,
+                    write_args,
+                );
+                let _ = slot;
+                tb.ring.commit(staging);
+            }
         }
     });
 }

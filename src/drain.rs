@@ -14,7 +14,9 @@ use crate::record::{
     END_OF_BUFFER, FLAG_COMPLEX, FLAG_FORMAT, FLAG_PROCESS, FLAG_SOURCE, FLAG_THREAD, HEADER_SIZE,
     LOG_RECORD, VERSION,
 };
-use crate::ring::{RING_SIZE, RingBuffer, SLOT_SIZE, align_up};
+use crate::ring::RingBuffer;
+#[cfg(not(feature = "backend-ringbuffer"))]
+use crate::ring::{SLOT_SIZE, align_up};
 use crate::sink::LogSink;
 use crate::thread_buf::REGISTRY;
 use crate::timestamp::{Calibration, format_iso8601, ticks_to_ns};
@@ -276,7 +278,10 @@ impl Drain {
     /// Runs the poll loop until shutdown is signaled, then does one final pass
     /// so records written just before shutdown are not lost.
     pub(crate) fn run(&mut self) {
-        let mask = (RING_SIZE - 1) as u64;
+        // Reused across every record; cleared per record. No per-record alloc.
+        // `staging` persists partial FIFO-backend records between polls; the
+        // custom ring backend never touches it.
+        let mut staging = Vec::with_capacity(4096);
         // Reused across every record; cleared per record. No per-record alloc.
         let mut buf = Vec::with_capacity(4096);
         // Idle backoff counter. The idle path reads no clock and takes no lock.
@@ -300,11 +305,11 @@ impl Drain {
             // wrap, so every SYNC_EVERY-th pass syncs. A ring registered between
             // syncs keeps its records in its own buffer until the next sync.
             if (since_sync & SYNC_MASK) == 0 {
-                self.sync_rings(mask, &mut buf);
+                self.sync_rings(&mut staging, &mut buf);
             }
             since_sync = since_sync.wrapping_add(1);
 
-            if self.poll_once(mask, &mut buf) {
+            if self.poll_once(&mut staging, &mut buf) {
                 spin = SPIN_MIN; // work found: reset backoff and re-poll now
                 dirty = true;
                 continue;
@@ -327,8 +332,8 @@ impl Drain {
         // Final pass: pick up any last records, including from rings whose
         // producers exited after the previous sync, then flush so nothing is
         // left buffered when the drain exits.
-        self.sync_rings(mask, &mut buf);
-        self.poll_once(mask, &mut buf);
+        self.sync_rings(&mut staging, &mut buf);
+        self.poll_once(&mut staging, &mut buf);
         self.flush_sink();
     }
 
@@ -344,7 +349,7 @@ impl Drain {
     /// registered rings, and gives each ring whose producer has exited one final
     /// drain before dropping it. The registry lock is released before that
     /// drain, so sink I/O never runs under the lock.
-    fn sync_rings(&mut self, mask: u64, buf: &mut Vec<u8>) {
+    fn sync_rings(&mut self, staging: &mut Vec<u8>, buf: &mut Vec<u8>) {
         let mut registry = REGISTRY
             .get()
             .expect("invariant: ring registry must be initialized by configure! before the drain starts")
@@ -379,9 +384,10 @@ impl Drain {
                 i += 1;
             } else {
                 let ring = self.rings.swap_remove(i);
+                staging.clear();
                 drain_ring(
                     &ring,
-                    mask,
+                    staging,
                     self.sink.as_mut(),
                     self.timezone_offset,
                     &self.calibration,
@@ -394,12 +400,13 @@ impl Drain {
 
     /// Drains every ring once, emitting all records published since the last
     /// pass. Returns `true` if any record was processed.
-    fn poll_once(&mut self, mask: u64, buf: &mut Vec<u8>) -> bool {
+    fn poll_once(&mut self, staging: &mut Vec<u8>, buf: &mut Vec<u8>) -> bool {
         let mut had_work = false;
         for ring in &self.rings {
+            staging.clear();
             if drain_ring(
                 ring,
-                mask,
+                staging,
                 self.sink.as_mut(),
                 self.timezone_offset,
                 &self.calibration,
@@ -413,32 +420,36 @@ impl Drain {
     }
 }
 
-/// Drains one ring: emits every record in `[tail, head)` to `sink` and
-/// publishes the advanced tail. Returns `true` if any record range was
-/// processed.
+/// Drains one custom-backend ring: emits every record in `[tail, head)` to
+/// `sink` and publishes the advanced tail. Returns `true` if any record range
+/// was processed.
 ///
 /// Takes the drain's formatting inputs explicitly rather than `&self` so it can
 /// run both from the poll loop (over live rings) and from `sync_rings` (a final
-/// drain of a dead ring before it is dropped).
+/// drain of a dead ring before it is dropped). `staging` is unused: the custom
+/// ring stores slot-aligned records in its own memory.
+#[cfg(not(feature = "backend-ringbuffer"))]
 fn drain_ring(
     ring: &RingBuffer,
-    mask: u64,
+    _staging: &mut Vec<u8>,
     sink: &mut dyn LogSink,
     timezone_offset: i32,
     calibration: &Calibration,
     line_pattern: &Template,
     buf: &mut Vec<u8>,
 ) -> bool {
+    let capacity = ring.capacity();
+    let mask = (capacity - 1) as u64;
     // Own index: Relaxed load; the drain is the sole writer of `tail`.
-    let mut tail = ring.tail.load(Ordering::Relaxed);
+    let mut tail = ring.tail().load(Ordering::Relaxed);
     // SAFETY: head_cache is drain-private; no producer touches it and the
     // drain is single-threaded, so this raw access is unaliased.
-    let mut head_cache = unsafe { *ring.head_cache.get() };
+    let mut head_cache = unsafe { *ring.head_cache() };
 
     // Cached-index fast path: pay the cross-core Acquire load of `head` only
     // when the cache says we have caught up.
     if tail == head_cache {
-        head_cache = ring.head.load(Ordering::Acquire);
+        head_cache = ring.head().load(Ordering::Acquire);
         if tail == head_cache {
             return false; // no new records in this ring
         }
@@ -448,7 +459,7 @@ fn drain_ring(
     // `data` cells, never a slice reference that would race the producer's
     // write. It reads only [tail, head_cache), a region the producer published
     // via its Release store of `head` and will not overwrite while tail lags.
-    let base = ring.data.as_ptr() as *const u8;
+    let base = ring.data_ptr() as *const u8;
 
     while tail < head_cache {
         let offset = (tail & mask) as usize;
@@ -456,7 +467,7 @@ fn drain_ring(
         // SAFETY: `offset` is within the ring; the prefix cursor is bounded to
         // the bytes from `offset` to the end of the ring storage.
         let (version, rectype, total_size) = unsafe {
-            let mut c = Cursor::new(base.add(offset), RING_SIZE - offset);
+            let mut c = Cursor::new(base.add(offset), capacity - offset);
             let version = c.read_u8();
             let rectype = c.read_u8();
             let total_size = c.read_u16() as u64;
@@ -474,7 +485,7 @@ fn drain_ring(
         if version != VERSION
             || (rectype != LOG_RECORD && rectype != END_OF_BUFFER)
             || total_size < HEADER_SIZE as u64
-            || offset + total_size as usize > RING_SIZE
+            || offset + total_size as usize > capacity
         {
             eprintln!(
                 "ticklog: drain discarded a corrupt record \
@@ -509,13 +520,76 @@ fn drain_ring(
     // Publish the consumed position. Release pairs with the producer's Acquire
     // load of `tail` in its capacity check, so the producer never overwrites a
     // slot the drain has not finished reading.
-    ring.tail.store(tail, Ordering::Release);
+    ring.tail().store(tail, Ordering::Release);
     // SAFETY: head_cache is drain-private, as above.
     unsafe {
-        *ring.head_cache.get() = head_cache;
+        *ring.head_cache() = head_cache;
     }
 
     true
+}
+
+/// Drains one FIFO-backend ring: pops every byte currently buffered into
+/// `staging`, formats the complete records it holds, and keeps the incomplete
+/// tail for the next poll. Returns `true` if any record was processed.
+///
+/// The drain holds no lock while decoding, so the producer never blocks on
+/// sink I/O: `pop_available` releases the FIFO mutex before formatting.
+#[cfg(feature = "backend-ringbuffer")]
+fn drain_ring(
+    ring: &RingBuffer,
+    staging: &mut Vec<u8>,
+    sink: &mut dyn LogSink,
+    timezone_offset: i32,
+    calibration: &Calibration,
+    line_pattern: &Template,
+    buf: &mut Vec<u8>,
+) -> bool {
+    ring.pop_available(staging);
+    let mut had_work = false;
+    let mut pos = 0usize;
+    while staging.len() - pos >= HEADER_SIZE {
+        let version = staging[pos];
+        let rectype = staging[pos + 1];
+        let total_size = u16::from_le_bytes([staging[pos + 2], staging[pos + 3]]) as usize;
+
+        if rectype == END_OF_BUFFER {
+            // Never produced by the FIFO backend; tolerated. Keep `pos` bounded
+            // so a corrupt size cannot drive `pos` past `staging.len()` and
+            // panic the drain on the next `staging[pos]` read.
+            if pos + total_size > staging.len() {
+                break;
+            }
+            pos += total_size;
+            continue;
+        }
+        if version != VERSION || rectype != LOG_RECORD || total_size < HEADER_SIZE {
+            eprintln!("ticklog: drain discarded a corrupt record; resyncing the FIFO cursor");
+            pos += 1;
+            continue;
+        }
+        if pos + total_size > staging.len() {
+            break; // record still streaming in; wait for the rest
+        }
+
+        let record = &staging[pos..pos + total_size];
+        let level = record
+            .get(4)
+            .and_then(|&b| Level::from_u8(b))
+            .unwrap_or(Level::Error);
+
+        buf.clear();
+        decode_and_format(record, timezone_offset, calibration, line_pattern, buf);
+        if let Err(e) = sink.accept(buf, level) {
+            eprintln!("ticklog: sink accept failed: {}", e);
+        }
+        pos += total_size;
+        had_work = true;
+    }
+    if pos > 0 {
+        staging.drain(..pos);
+    }
+    had_work
 }
 
 /// Decodes one encoded record and appends a formatted line to `buf`.
@@ -946,14 +1020,15 @@ mod tests {
 
     /// Writes `bytes` into a ring at `offset` and advances `head` by
     /// `align_up(len, SLOT_SIZE)` to mimic the producer.
+    #[cfg(not(feature = "backend-ringbuffer"))]
     fn place_record(ring: &RingBuffer, offset: u64, bytes: &[u8]) {
         // SAFETY: single-threaded test with exclusive access to the ring data.
         let data =
-            unsafe { std::slice::from_raw_parts_mut(ring.data.as_ptr() as *mut u8, RING_SIZE) };
+            unsafe { std::slice::from_raw_parts_mut(ring.data_ptr(), ring.capacity()) };
         let start = offset as usize;
         data[start..start + bytes.len()].copy_from_slice(bytes);
         let new_head = offset + align_up(bytes.len() as u64, SLOT_SIZE as u64);
-        ring.head.store(new_head, Ordering::Release);
+        ring.head().store(new_head, Ordering::Release);
     }
 
     // ---- Cursor tests -------------------------------------------------------
@@ -1206,13 +1281,14 @@ mod tests {
     fn poll_empty_ring_no_accepts() {
         let (mut drain, calls) = capture_drain();
         drain.rings.push(Arc::new(RingBuffer::new()));
-        let mask = (RING_SIZE - 1) as u64;
+        let mut staging = Vec::new();
         let mut buf = Vec::new();
-        assert!(!drain.poll_once(mask, &mut buf));
+        assert!(!drain.poll_once(&mut staging, &mut buf));
         assert!(calls.lock().unwrap().is_empty());
     }
 
     #[test]
+    #[cfg(not(feature = "backend-ringbuffer"))]
     fn poll_one_record_accepts_and_advances_tail() {
         let (mut drain, calls) = capture_drain();
         let ring = Arc::new(RingBuffer::new());
@@ -1226,12 +1302,12 @@ mod tests {
             &[le_bytes(TAG_U64, 42)],
         );
         place_record(&ring, 0, &record);
-        let head = ring.head.load(Ordering::Acquire);
+        let head = ring.head().load(Ordering::Acquire);
         drain.rings.push(Arc::clone(&ring));
 
-        let mask = (RING_SIZE - 1) as u64;
+        let mut staging = Vec::new();
         let mut buf = Vec::new();
-        assert!(drain.poll_once(mask, &mut buf));
+        assert!(drain.poll_once(&mut staging, &mut buf));
 
         let recorded = calls.lock().unwrap();
         assert_eq!(recorded.len(), 1);
@@ -1241,12 +1317,13 @@ mod tests {
         );
         assert_eq!(recorded[0].1, Level::Info);
         // tail advanced to head; a second poll finds no work.
-        assert_eq!(ring.tail.load(Ordering::Relaxed), head);
+        assert_eq!(ring.tail().load(Ordering::Relaxed), head);
         drop(recorded);
-        assert!(!drain.poll_once(mask, &mut buf));
+        assert!(!drain.poll_once(&mut staging, &mut buf));
     }
 
     #[test]
+    #[cfg(not(feature = "backend-ringbuffer"))]
     fn poll_discards_corrupt_record_and_resyncs_to_head() {
         let (mut drain, calls) = capture_drain();
         let ring = Arc::new(RingBuffer::new());
@@ -1266,9 +1343,9 @@ mod tests {
         place_record(&ring, off3, &r2);
 
         drain.rings.push(Arc::clone(&ring));
-        let mask = (RING_SIZE - 1) as u64;
+        let mut staging = Vec::new();
         let mut buf = Vec::new();
-        drain.poll_once(mask, &mut buf);
+        drain.poll_once(&mut staging, &mut buf);
 
         // Only the record before the corruption is emitted: the drain must not
         // decode the corrupt bytes as a record, and resyncs `tail` to the
@@ -1279,6 +1356,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "backend-ringbuffer"))]
     fn poll_skips_end_of_buffer_record() {
         let (mut drain, calls) = capture_drain();
         let ring = Arc::new(RingBuffer::new());
@@ -1295,9 +1373,9 @@ mod tests {
         place_record(&ring, SLOT_SIZE as u64, &record);
 
         drain.rings.push(Arc::clone(&ring));
-        let mask = (RING_SIZE - 1) as u64;
+        let mut staging = Vec::new();
         let mut buf = Vec::new();
-        assert!(drain.poll_once(mask, &mut buf));
+        assert!(drain.poll_once(&mut staging, &mut buf));
 
         let recorded = calls.lock().unwrap();
         assert_eq!(recorded.len(), 1);
@@ -1305,6 +1383,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "backend-ringbuffer"))]
     fn poll_multiple_records_in_one_ring() {
         let (mut drain, calls) = capture_drain();
         let ring = Arc::new(RingBuffer::new());
@@ -1316,17 +1395,17 @@ mod tests {
         {
             // SAFETY: single-threaded test with exclusive access.
             let data =
-                unsafe { std::slice::from_raw_parts_mut(ring.data.as_ptr() as *mut u8, RING_SIZE) };
+                unsafe { std::slice::from_raw_parts_mut(ring.data_ptr(), ring.capacity()) };
             data[..r1.len()].copy_from_slice(&r1);
             let off2 = slot as usize;
             data[off2..off2 + r2.len()].copy_from_slice(&r2);
         }
-        ring.head.store(2 * slot, Ordering::Release);
+        ring.head().store(2 * slot, Ordering::Release);
         drain.rings.push(Arc::clone(&ring));
 
-        let mask = (RING_SIZE - 1) as u64;
+        let mut staging = Vec::new();
         let mut buf = Vec::new();
-        assert!(drain.poll_once(mask, &mut buf));
+        assert!(drain.poll_once(&mut staging, &mut buf));
 
         let recorded = calls.lock().unwrap();
         assert_eq!(recorded.len(), 2);
@@ -1355,14 +1434,14 @@ mod tests {
             .unwrap()
             .push(Arc::clone(&ring));
 
-        let mask = (RING_SIZE - 1) as u64;
+        let mut staging = Vec::new();
         let mut buf = Vec::new();
-        drain.sync_rings(mask, &mut buf);
+        drain.sync_rings(&mut staging, &mut buf);
         assert!(drain.rings.iter().any(|r| Arc::ptr_eq(r, &ring)));
 
         // Mark the ring dead; the next sync must drop it.
         ring.live.store(false, Ordering::Release);
-        drain.sync_rings(mask, &mut buf);
+        drain.sync_rings(&mut staging, &mut buf);
         assert!(!drain.rings.iter().any(|r| Arc::ptr_eq(r, &ring)));
     }
 
@@ -1378,18 +1457,19 @@ mod tests {
             .unwrap()
             .push(Arc::clone(&ring));
 
-        let mask = (RING_SIZE - 1) as u64;
+        let mut staging = Vec::new();
         let mut buf = Vec::new();
-        drain.sync_rings(mask, &mut buf);
-        drain.sync_rings(mask, &mut buf);
+        drain.sync_rings(&mut staging, &mut buf);
+        drain.sync_rings(&mut staging, &mut buf);
         let count = drain.rings.iter().filter(|r| Arc::ptr_eq(r, &ring)).count();
         assert_eq!(count, 1);
         // Clean up so a dead ring is not left in the shared registry.
         ring.live.store(false, Ordering::Release);
-        drain.sync_rings(mask, &mut buf);
+        drain.sync_rings(&mut staging, &mut buf);
     }
 
     #[test]
+    #[cfg(not(feature = "backend-ringbuffer"))]
     fn sync_drains_dead_ring_before_dropping_it() {
         init_registry();
         let (mut drain, calls) = capture_drain();
@@ -1404,9 +1484,9 @@ mod tests {
         ring.live.store(false, Ordering::Release);
         drain.rings.push(Arc::clone(&ring));
 
-        let mask = (RING_SIZE - 1) as u64;
+        let mut staging = Vec::new();
         let mut buf = Vec::new();
-        drain.sync_rings(mask, &mut buf);
+        drain.sync_rings(&mut staging, &mut buf);
 
         // The dead ring's record must reach the sink before the ring is dropped.
         let recorded = calls.lock().unwrap();
@@ -1429,13 +1509,14 @@ mod tests {
     ///   MIRIFLAGS="-Zmiri-tree-borrows" \
     ///     cargo +nightly miri test --lib producer_and_drain_concurrent
     #[test]
+    #[cfg(not(feature = "backend-ringbuffer"))]
     fn producer_and_drain_concurrent_no_aliasing_ub() {
         use crate::builder::Backpressure;
         use std::sync::Barrier;
 
         const N: usize = 8;
         let ring = Arc::new(RingBuffer::new());
-        let mask = (RING_SIZE - 1) as u64;
+        let mut staging = Vec::new();
         let record = build_record(
             Level::Info,
             0x1234,
@@ -1480,7 +1561,7 @@ mod tests {
         while calls.lock().unwrap().len() < N {
             drain_ring(
                 &ring,
-                mask,
+                &mut staging,
                 &mut sink,
                 0,
                 &calibration,
@@ -1496,5 +1577,81 @@ mod tests {
 
         producer.join().unwrap();
         assert_eq!(calls.lock().unwrap().len(), N);
+    }
+
+    // ---- FIFO-backend drain tests ------------------------------------------
+
+    /// Pushes a fully assembled record into a FIFO ring like the producer
+    /// macro path does (reserve, then commit the byte stream).
+    #[cfg(feature = "backend-ringbuffer")]
+    fn push_record(ring: &RingBuffer, bytes: &[u8]) {
+        use crate::builder::Backpressure;
+        let slot = ring.reserve(bytes.len(), Backpressure::Drop).unwrap();
+        ring.commit(bytes);
+        let _ = slot;
+    }
+
+    #[test]
+    #[cfg(feature = "backend-ringbuffer")]
+    fn fifo_drain_formats_complete_records() {
+        let (mut drain, calls) = capture_drain();
+        let ring = Arc::new(RingBuffer::new());
+        let record = build_record(
+            Level::Info,
+            0,
+            "x={}",
+            Some(("a.rs", 7)),
+            1,
+            None,
+            &[le_bytes(TAG_U64, 42)],
+        );
+        drain.rings.push(Arc::clone(&ring));
+        push_record(&ring, &record);
+
+        let mut staging = Vec::new();
+        let mut buf = Vec::new();
+        assert!(drain.poll_once(&mut staging, &mut buf));
+
+        let recorded = calls.lock().unwrap();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(
+            recorded[0].0,
+            "1970-01-01T00:00:00.000000000Z INFO a.rs:7 x=42",
+        );
+        // Second poll finds nothing further and the staging is empty again.
+        drop(recorded);
+        assert!(!drain.poll_once(&mut staging, &mut buf));
+        assert!(staging.is_empty());
+    }
+
+    #[test]
+    #[cfg(feature = "backend-ringbuffer")]
+    fn fifo_drain_passes_whole_records_atomically() {
+        // The producer commits each record under the FIFO mutex, and the drain
+        // pops under the same mutex, so the drain always observes whole
+        // records: a partially committed record is never visible. Two records
+        // committed back-to-back must both be emitted in a single pump.
+        let (mut drain, calls) = capture_drain();
+        let ring = Arc::new(RingBuffer::new());
+        drain.rings.push(Arc::clone(&ring));
+
+        let r1 = build_record(Level::Info, 0, "one", Some(("", 0)), 1, None, &[]);
+        let r2 = build_record(Level::Warn, 0, "two", Some(("", 0)), 1, None, &[]);
+        push_record(&ring, &r1);
+        push_record(&ring, &r2);
+
+        let mut staging = Vec::new();
+        let mut buf = Vec::new();
+        assert!(drain.poll_once(&mut staging, &mut buf));
+
+        let recorded = calls.lock().unwrap();
+        assert_eq!(recorded.len(), 2, "got {recorded:?}");
+        assert_eq!(recorded[0].1, Level::Info);
+        assert_eq!(recorded[1].1, Level::Warn);
+        drop(recorded);
+
+        // Ring is empty and a re-poll finds nothing.
+        assert!(!drain.poll_once(&mut staging, &mut buf));
+        assert!(ring.is_empty());
     }
 }

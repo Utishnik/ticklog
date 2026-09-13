@@ -74,10 +74,16 @@ macro_rules! configure {
         macro_rules! __ticklog_backpressure {
             () => { $crate::configure!(__pick backpressure { $($key : $val ,)* }) };
         }
+        #[allow(non_local_definitions)]
+        #[macro_export]
+        macro_rules! __ticklog_ring_capacity {
+            () => { $crate::configure!(__pick ring_capacity { $($key : $val ,)* }) };
+        }
         $crate::__private::__configure_rt(
             Box::new($crate::configure!(__pick sink { $($key : $val ,)* })),
             $crate::configure!(__pick timezone_offset { $($key : $val ,)* }),
             $crate::configure!(__pick drain_affinity { $($key : $val ,)* }),
+            $crate::configure!(__pick ring_capacity { $($key : $val ,)* }),
             $crate::configure!(__pick format { $($key : $val ,)* }),
         )
     }};
@@ -117,6 +123,13 @@ macro_rules! configure {
     };
     (__pick drain_affinity { }) => { None::<Vec<usize>> };
 
+    // __pick ring_capacity
+    (__pick ring_capacity { ring_capacity: $val:expr, $($rest:tt)* }) => { ($val) as usize };
+    (__pick ring_capacity { $_other:ident : $_val:expr, $($rest:tt)* }) => {
+        $crate::configure!(__pick ring_capacity { $($rest)* })
+    };
+    (__pick ring_capacity { }) => { $crate::__private::DEFAULT_RING_SIZE };
+
     // __pick format
     (__pick format { format: $val:expr, $($rest:tt)* }) => { $val };
     (__pick format { $_other:ident : $_val:expr, $($rest:tt)* }) => {
@@ -132,10 +145,16 @@ pub fn __configure_rt(
     sink: Box<dyn LogSink>,
     timezone_offset: i32,
     drain_affinity: Option<Vec<usize>>,
+    ring_capacity: usize,
     format_str: impl Into<String>,
 ) -> Result<Guard, TicklogError> {
     if !(MIN_TZ_OFFSET..=MAX_TZ_OFFSET).contains(&timezone_offset) {
         return Err(TicklogError::InvalidTimezoneOffset(timezone_offset));
+    }
+
+    // Reject an invalid ring capacity before claiming any global resources.
+    if !ring_capacity.is_power_of_two() || ring_capacity < crate::ring::SLOT_SIZE {
+        return Err(TicklogError::InvalidRingCapacity(ring_capacity));
     }
 
     // Parse the log-line pattern before claiming any global resources, so an
@@ -162,6 +181,10 @@ pub fn __configure_rt(
         calibration,
         line_pattern,
     );
+
+    // The capacity is validated above and REGISTRY succeeded, so this set
+    // always wins on the first (and only) configure call.
+    let _ = crate::thread_buf::RING_CAPACITY.set(ring_capacity);
 
     let drain_affinity_opt = drain_affinity.clone();
     let handle = thread::Builder::new()
@@ -192,11 +215,11 @@ mod tests {
     #[test]
     fn configure_rt_rejects_out_of_range_timezone_offset() {
         assert!(matches!(
-            __configure_rt(Box::new(ConsoleSink::stderr()), 50_401, None, ""),
+            __configure_rt(Box::new(ConsoleSink::stderr()), 50_401, None, crate::ring::DEFAULT_RING_SIZE, ""),
             Err(TicklogError::InvalidTimezoneOffset(50_401))
         ));
         assert!(matches!(
-            __configure_rt(Box::new(ConsoleSink::stderr()), -43_201, None, ""),
+            __configure_rt(Box::new(ConsoleSink::stderr()), -43_201, None, crate::ring::DEFAULT_RING_SIZE, ""),
             Err(TicklogError::InvalidTimezoneOffset(-43_201))
         ));
     }
@@ -204,7 +227,7 @@ mod tests {
     #[test]
     fn configure_rt_already_initialized() {
         let _ = REGISTRY.set(Mutex::new(Vec::new()));
-        let result = __configure_rt(Box::new(ConsoleSink::stderr()), 0, None, "");
+        let result = __configure_rt(Box::new(ConsoleSink::stderr()), 0, None, crate::ring::DEFAULT_RING_SIZE, "");
         assert!(matches!(result, Err(TicklogError::AlreadyInitialized)));
     }
 
@@ -212,7 +235,21 @@ mod tests {
     fn configure_rt_rejects_invalid_format_pattern() {
         // We need REGISTRY unset for this to reach the parse step; use an
         // invalid pattern to trigger the error.
-        let result = __configure_rt(Box::new(ConsoleSink::stderr()), 0, None, "{unknown_field}");
+        let result = __configure_rt(Box::new(ConsoleSink::stderr()), 0, None, crate::ring::DEFAULT_RING_SIZE, "{unknown_field}");
         assert!(matches!(result, Err(TicklogError::InvalidFormatPattern(_))));
+    }
+
+    #[test]
+    fn configure_rt_rejects_invalid_ring_capacity() {
+        // Not a power of two.
+        assert!(matches!(
+            __configure_rt(Box::new(ConsoleSink::stderr()), 0, None, 1_000_000, "{}"),
+            Err(TicklogError::InvalidRingCapacity(1_000_000))
+        ));
+        // Smaller than the minimum slot size.
+        assert!(matches!(
+            __configure_rt(Box::new(ConsoleSink::stderr()), 0, None, 8, "{}"),
+            Err(TicklogError::InvalidRingCapacity(8))
+        ));
     }
 }

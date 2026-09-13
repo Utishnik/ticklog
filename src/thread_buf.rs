@@ -10,7 +10,7 @@ use std::thread;
 
 use crate::error::TicklogError;
 use crate::record::THREAD_SECTION_BASE_SIZE;
-use crate::ring::RingBuffer;
+use crate::ring::{DEFAULT_RING_SIZE, RingBuffer};
 
 /// A thread's local ring buffer and cached metadata.
 ///
@@ -25,6 +25,10 @@ pub(crate) struct ThreadBuf {
     pub(crate) thread_name: String,
     /// Encoded wire size of the thread section for this thread.
     pub(crate) thread_section_size: u16,
+    /// Reusable staging buffer for backend-record byte pushes. Only the
+    /// `backend-ringbuffer` backend writes records this way.
+    #[cfg(feature = "backend-ringbuffer")]
+    pub(crate) staging: Vec<u8>,
 }
 
 impl Drop for ThreadBuf {
@@ -43,6 +47,11 @@ impl Drop for ThreadBuf {
 const MAX_THREAD_NAME_LEN: usize = 256;
 
 const _: () = assert!(THREAD_SECTION_BASE_SIZE + MAX_THREAD_NAME_LEN <= u16::MAX as usize);
+
+/// Per-thread ring buffer capacity, set once at [`crate::configure!`] time.
+/// Falls back to [`DEFAULT_RING_SIZE`] when the ring registry is initialized
+/// directly (as in tests) without a matching configure call.
+pub(crate) static RING_CAPACITY: OnceLock<usize> = OnceLock::new();
 
 /// Extracts a stable `u64` identifier from [`std::thread::ThreadId`] by
 /// parsing its `Debug` representation.
@@ -137,7 +146,8 @@ where
         let opt = unsafe { &mut *slot.buf.get() };
 
         if opt.is_none() {
-            let ring = Arc::new(RingBuffer::new());
+            let capacity = RING_CAPACITY.get().copied().unwrap_or(DEFAULT_RING_SIZE);
+            let ring = Arc::new(RingBuffer::with_capacity(capacity));
             register_ring(Arc::clone(&ring));
             let thread_name: String = thread::current()
                 .name()
@@ -161,6 +171,8 @@ where
                 thread_id: get_stable_thread_id(),
                 thread_name,
                 thread_section_size,
+                #[cfg(feature = "backend-ringbuffer")]
+                staging: Vec::with_capacity(1024),
             });
         }
 
@@ -230,6 +242,8 @@ mod tests {
             thread_id: 42,
             thread_name: "test-thread".into(),
             thread_section_size: (THREAD_SECTION_BASE_SIZE + "test-thread".len()) as u16,
+            #[cfg(feature = "backend-ringbuffer")]
+            staging: Vec::new(),
         };
         assert_eq!(tb.thread_id, 42);
         assert_eq!(&tb.thread_name, "test-thread");
@@ -248,6 +262,8 @@ mod tests {
             thread_id: 1,
             thread_name: "t".into(),
             thread_section_size: THREAD_SECTION_BASE_SIZE as u16,
+            #[cfg(feature = "backend-ringbuffer")]
+            staging: Vec::new(),
         };
         assert!(ring.live.load(Ordering::Relaxed));
         drop(tb);
@@ -263,6 +279,8 @@ mod tests {
             thread_id: 1,
             thread_name: "t".into(),
             thread_section_size: THREAD_SECTION_BASE_SIZE as u16,
+            #[cfg(feature = "backend-ringbuffer")]
+            staging: Vec::new(),
         };
         drop(tb);
         // Drop set live = false on the shared RingBuffer.

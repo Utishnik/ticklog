@@ -22,6 +22,10 @@ pub enum TicklogError {
 
     /// Log line pattern could not be parsed.
     InvalidFormatPattern(&'static str),
+
+    /// A configured ring capacity was invalid (not a power of two or smaller
+    /// than the minimum slot size).
+    InvalidRingCapacity(usize),
 }
 
 impl fmt::Display for TicklogError {
@@ -39,6 +43,11 @@ impl fmt::Display for TicklogError {
                 secs
             ),
             Self::InvalidFormatPattern(msg) => write!(f, "invalid format pattern: {}", msg),
+            Self::InvalidRingCapacity(cap) => write!(
+                f,
+                "invalid ring capacity: {cap} bytes is not a power of two >= {}",
+                crate::ring::SLOT_SIZE
+            ),
         }
     }
 }
@@ -122,6 +131,14 @@ mod tests {
             e.to_string(),
             "invalid format pattern: unknown field name in placeholder"
         );
+        assert!(Error::source(&e).is_none());
+    }
+
+    #[test]
+    fn display_invalid_ring_capacity() {
+        let e = TicklogError::InvalidRingCapacity(1000);
+        assert!(e.to_string().contains("invalid ring capacity: 1000 bytes"));
+        assert!(e.to_string().contains("power of two"));
         assert!(Error::source(&e).is_none());
     }
 }

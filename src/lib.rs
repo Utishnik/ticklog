@@ -96,6 +96,15 @@
 //!   UTC (`0`).
 //! - `drain_affinity`: pin the drain thread to a set of logical CPUs
 //!   (`Option<Vec<usize>>`). Defaults to `None`.
+//! - `ring_capacity`: per-thread ring buffer size in bytes. Must be a power of
+//!   two. Defaults to 1 MiB.
+//!
+//! # Experimental backend
+//!
+//! With the `backend-ringbuffer` Cargo feature, the crate-local zero-copy ring
+//! is replaced by an experimental byte FIFO built on the `ringbuffer` crate.
+//! The `ring_capacity` key works the same either way; see
+//! [`crate::ring`] for details on the trade-offs.
 //!
 //! # Sinks
 //!
@@ -136,12 +145,14 @@
 //! - **Lock-free ring buffer:** the buffer shared between the calling thread
 //!   and the drain thread uses atomic ordering to coordinate access without
 //!   locks. The calling thread only writes; the drain thread only reads.
-//! - **Affinity syscalls:** platform thread-affinity calls require raw pointer
-//!   and FFI usage, gated behind `#[cfg(target_os)]`.
+//! - **Affinity syscalls:** thread affinity is delegated to the `core_affinity`
+//!   crate, which wraps the platform syscalls behind a safe API.
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
 mod affinity;
+#[cfg(feature = "backend-ringbuffer")]
+mod ringbuffer_backend;
 mod builder;
 mod drain;
 mod encode;
@@ -175,4 +186,5 @@ pub mod __private {
     pub use crate::format::check_fmt;
     pub use crate::macros::dispatch;
     pub use crate::record::BASE_RECORD_SIZE;
+    pub use crate::ring::DEFAULT_RING_SIZE;
 }

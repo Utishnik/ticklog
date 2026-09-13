@@ -10,6 +10,15 @@ repository = "https://github.com/tensorbinge/ticklog"
 rust-version = "1.85"
 version = "0.1.2"
 
+[dependencies]
+core_affinity = "0.8"
+crossbeam-utils = "0.8"
+ringbuffer = { version = "0.16", optional = true }
+
+[features]
+default = []
+backend-ringbuffer = ["dep:ringbuffer"]
+
 [dev-dependencies]
 criterion = {version = "0.5", features = ["html_reports"]}
 env_logger = "0.11"
