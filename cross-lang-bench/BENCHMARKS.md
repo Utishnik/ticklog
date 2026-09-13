@@ -362,3 +362,157 @@ this benchmark; it is kept only as a data point for lossy slipstream use.
 - `ticklog_file` uses `--sink-file`: the drain writes formatted lines to a real
   file (`BufWriter`, 64 KiB). The harness measure wall time around producers;
   file writes land in page cache on the same host as nanolog's log file.
+---
+
+# Run 2 — Different Hardware (WSL2 box)
+
+Second run on **different hardware**: Intel(R) Xeon(R) CPU E5-2689 0 @ 2.60GHz,
+16 vCPUs, 12 GB RAM, WSL2 (kernel 5.10.16.3-microsoft-standard-WSL2), Ubuntu 22.04.
+Best-effort numbers — no core isolation and no `perf` (not available on the WSL
+kernel), performance governor not settable.
+
+Candidates in this run: **ticklog, nanolog, zerolog, zap**. Quill was skipped:
+its SPSC queues double up to 128+ MiB per producer and the 8/16-thread configs
+grew past ~11 GB RSS and kept OOM-killing the VM.
+
+Toolchain for this run:
+- C++ (nanolog): **clang-22** with `-O3 -march=native -mtune=native -flto=thin
+  -fuse-ld=/usr/bin/ld.lld-22 -funroll-loops -fstrict-aliasing
+  -fomit-frame-pointer -fno-semantic-interposition -ffast-math`.
+- Rust (ticklog): `RUSTFLAGS="-C target-cpu=native"` plus the crate profile
+  `lto = "fat", codegen-units = 1`.
+- Go (zerolog/zap): go1.27.1.
+
+Protocol is unchanged: BATCH=1000, SAMPLES=10000, 10M messages per config.
+
+## Latency (Run 2)
+
+### single_int
+
+| Threads | Candidate | p50 (ns) | p95 (ns) | p99 (ns) | p999 (ns) | max (ns) |
+|---------|-----------|----------|----------|----------|-----------|----------|
+| 1 | ticklog   | 8.7      | 11.3     | 21.4     | 37.3      | 115.3    |
+| 1 | nanolog   | 8.8      | 24.7     | 200.1    | 635.9     | 719.5    |
+| 1 | zerolog   | 113.2    | 130.6    | 161.1    | 241.6     | 284.4    |
+| 1 | zap       | 552.6    | 642.0    | 1303.2   | 1621.6    | 4399.0   |
+| 2 | ticklog   | 8.7      | 8.7      | 21.9     | 60.0      | 135.6    |
+| 2 | nanolog   | 8.8      | 26.8     | 750.5    | 884.0     | 225051.8 |
+| 2 | zerolog   | 122.4    | 317.0    | 334.3    | 386.9     | 461.9    |
+| 2 | zap       | 568.5    | 880.3    | 1726.8   | 1955.9    | 2234.9   |
+| 4 | ticklog   | 8.7      | 13.1     | 22.4     | 61.8      | 102.2    |
+| 4 | nanolog   | 12.9     | 31.6     | 2085.3   | 2559.1    | 223855.3 |
+| 4 | zerolog   | 113.0    | 266.1    | 330.5    | 379.3     | 799.7    |
+| 4 | zap       | 597.6    | 1842.3   | 2223.8   | 2526.7    | 2775.8   |
+| 8 | ticklog   | 12.1     | 13.1     | 29.7     | 88.6      | 125.0    |
+| 8 | nanolog   | 12.8     | 34.4     | 7137.9   | 7652.2    | 9857748.7 |
+| 8 | zerolog   | 132.8    | 302.3    | 413.1    | 520.6     | 10062.2  |
+| 8 | zap       | 904.8    | 2798.5   | 3231.4   | 7246.8    | 9129.7   |
+| 16 | ticklog  | 13.0     | 13.2     | 77.1     | 476.2     | 8114.7   |
+| 16 | nanolog  | 13.2     | 95.9     | 35270.0  | 269485.6  | 301266.6 |
+| 16 | zerolog  | 242.7    | 608.6    | 1577.8   | 4270.4    | 13680.8  |
+| 16 | zap      | 1354.4   | 6167.7   | 11944.4  | 21776.5   | 29200.1  |
+
+### mixed
+
+| Threads | Candidate | p50 (ns) | p95 (ns) | p99 (ns) | p999 (ns) | max (ns) |
+|---------|-----------|----------|----------|----------|-----------|----------|
+| 1 | ticklog   | 9.3     | 9.4      | 24.4     | 44.0      | 81.6     |
+| 1 | nanolog   | 10.8    | 166.8    | 251.6    | 659.5     | 1517717.9 |
+| 1 | zerolog   | 237.0   | 259.2    | 336.9    | 378.2     | 415.9    |
+| 1 | zap       | 814.5   | 1412.2   | 1718.5   | 1924.3    | 2233.9   |
+| 2 | ticklog   | 9.3     | 9.4      | 24.6     | 56.3      | 104.5    |
+| 2 | nanolog   | 10.9    | 240.8    | 750.1    | 1364.9    | 278943.8 |
+| 2 | zerolog   | 239.6   | 389.6    | 414.2    | 513.5     | 529.7    |
+| 2 | zap       | 850.1   | 1894.0   | 2157.7   | 2493.0    | 3617.0   |
+| 4 | ticklog   | 9.3     | 9.4      | 22.1     | 62.5      | 104.1    |
+| 4 | nanolog   | 10.9    | 271.7    | 2171.2   | 264985.1  | 4894285.7 |
+| 4 | zerolog   | 249.9   | 425.3    | 609.8    | 657.0     | 740.3    |
+| 4 | zap       | 942.5   | 2503.3   | 2812.1   | 3193.0    | 4680.3   |
+| 8 | ticklog   | 12.8    | 14.0     | 35.0     | 126.1     | 284.2    |
+| 8 | nanolog   | 14.8    | 324.5    | 6646.1   | 1660004.2 | 2775908.1 |
+| 8 | zerolog   | 293.2   | 577.8    | 626.1    | 680.4     | 7201.6   |
+| 8 | zap       | 2586.0  | 3793.1   | 4629.0   | 10826.0   | 11548.6  |
+| 16 | ticklog  | 13.7    | 14.1     | 85.0     | 660.1     | 8888.3   |
+| 16 | nanolog  | 15.3    | 437.6    | 36562.2  | 366809.0  | 389993.8 |
+| 16 | zerolog  | 471.8   | 734.0    | 1845.1   | 5274.3    | 8496.8   |
+| 16 | zap      | 4486.2  | 12588.9  | 19321.0  | 33510.9   | 62163.3  |
+
+### string
+
+| Threads | Candidate | p50 (ns) | p95 (ns) | p99 (ns) | p999 (ns) | max (ns) |
+|---------|-----------|----------|----------|----------|-----------|----------|
+| 1 | ticklog   | 8.8    | 8.8      | 24.1     | 41.2      | 69.1     |
+| 1 | nanolog   | 9.1    | 99.7     | 260.6    | 349.3     | 252216.8 |
+| 1 | zerolog   | 119.0  | 136.7    | 164.3    | 242.5     | 286.0    |
+| 1 | zap       | 586.9  | 665.9    | 1321.4   | 1598.0    | 1899.2   |
+| 2 | ticklog   | 8.8    | 8.8      | 24.0     | 43.1      | 80.2     |
+| 2 | nanolog   | 9.1    | 173.3    | 848.1    | 1021.7    | 258927.7 |
+| 2 | zerolog   | 131.6  | 325.1    | 344.9    | 424.6     | 509.0    |
+| 2 | zap       | 605.0  | 1018.6   | 1765.2   | 2075.9    | 2291.0   |
+| 4 | ticklog   | 8.7    | 8.8      | 19.7     | 43.8      | 101.0    |
+| 4 | nanolog   | 9.2    | 171.7    | 2203.9   | 3517.1    | 9811392.1 |
+| 4 | zerolog   | 114.6  | 241.3    | 344.3    | 383.5     | 420.2    |
+| 4 | zap       | 620.5  | 1868.0   | 2219.8   | 2537.1    | 2738.3   |
+| 8 | ticklog   | 13.7   | 13.7     | 30.8     | 83.0      | 149.1    |
+| 8 | nanolog   | 13.6   | 143.5    | 7352.9   | 220981.5  | 237119.6 |
+| 8 | zerolog   | 136.8  | 350.4    | 408.3    | 469.8     | 547.6    |
+| 8 | zap       | 1102.5 | 3257.4   | 4136.4   | 7690.2    | 12642.2  |
+| 16 | ticklog  | 13.7   | 14.6     | 87.8     | 721.1     | 1983.0   |
+| 16 | nanolog  | 13.7   | 259.6    | 38676.7  | 7598366.1 | 7604913.2 |
+| 16 | zerolog  | 217.3  | 401.6    | 553.0    | 1975.0    | 3121.7   |
+| 16 | zap      | 1468.2 | 6491.1   | 12407.0  | 18706.5   | 32990.1  |
+
+## Throughput (Run 2)
+
+| Threads | Candidate | single_int (r/s) | mixed (r/s) | string (r/s) |
+|---------|-----------|------------------|-------------|--------------|
+| 1 | ticklog   | 108,006,407 | 102,351,317 | 107,275,074 |
+| 1 | nanolog   | 63,100,838  | 3,300,708   | 14,481,873  |
+| 1 | zerolog   | 8,536,660   | 4,115,781   | 8,168,723   |
+| 1 | zap       | 1,742,115   | 1,152,082   | 1,647,518   |
+| 2 | ticklog   | 217,238,765 | 205,979,587 | 216,858,587 |
+| 2 | nanolog   | 26,993,810  | 7,673,395   | 14,284,057  |
+| 2 | zerolog   | 11,118,196  | 7,562,616   | 10,229,173  |
+| 2 | zap       | 3,147,376   | 1,982,959   | 2,970,617   |
+| 4 | ticklog   | 304,715,472 | 405,508,426 | 424,435,607 |
+| 4 | nanolog   | 26,628,847  | 1,682,657   | 973,717     |
+| 4 | zerolog   | 23,013,662  | 12,150,059  | 27,271,765  |
+| 4 | zap       | 5,266,670   | 3,063,766   | 5,070,580   |
+| 8 | ticklog   | 529,192,928 | 526,321,330 | 518,726,009 |
+| 8 | nanolog   | 994,763     | 1,892,485   | 14,210,345  |
+| 8 | zerolog   | 39,352,587  | 20,476,379  | 38,484,851  |
+| 8 | zap       | 6,832,685   | 3,332,829   | 5,780,801   |
+| 16 | ticklog  | 553,375,869 | 556,445,869 | 574,092,360 |
+| 16 | nanolog  | 15,083,429  | 5,641,708   | 892,159     |
+| 16 | zerolog  | 44,683,491  | 27,047,503  | 51,162,646  |
+| 16 | zap      | 6,441,177   | 2,805,332   | 6,175,505   |
+
+## Thread Scaling (Run 2, single_int, r/s)
+
+| Candidate | 1 | 2 | 4 | 8 | 16 | scale 1->16 |
+|-----------|--------|---------|---------|---------|---------|-------------|
+| ticklog   | 108M   | 217M    | 305M    | 529M    | 553M    | 5.12x |
+| zerolog   | 8.5M   | 11.1M   | 23.0M   | 39.4M   | 44.7M   | 5.23x |
+| zap       | 1.7M   | 3.1M    | 5.3M    | 6.8M    | 6.4M    | 3.70x |
+| nanolog   | 63.1M  | 27.0M   | 26.6M   | 0.99M   | 15.1M   | 0.24x |
+
+## Jitter (Run 2, 1 thread, worst across workloads)
+
+| Candidate | p99 (ns) | p999 (ns) | max (ns) | p99/p50 |
+|-----------|----------|-----------|-----------|---------|
+| ticklog   | 24.4    | 44.0      | 115.3     | 2.7x |
+| zap       | 1718.5  | 1924.3    | 4399.0    | 2.4x |
+| zerolog   | 336.9   | 378.2     | 415.9     | 1.4x |
+| nanolog   | 260.6   | 659.5     | 1517717.9 | 28.7x |
+
+## Notes (Run 2)
+
+- Same protocol as the run above (BATCH=1000, 10M messages per config), but on
+  **different hardware / environment** — do not compare absolute numbers directly
+  across the two runs.
+- Quill is absent: its per-producer SPSC queues double up to 128+ MiB and the
+  8/16-thread configs grew past ~11 GB RSS, OOM-killing this VM. Treat any
+  historical quill high-thread numbers as lower bounds.
+- `ticklog_file` (--sink-file) was not part of this run.
+- No core isolation and no `perf` on the WSL kernel; cpupower cannot set the
+  governor. Numbers are best-effort.
