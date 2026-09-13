@@ -116,6 +116,19 @@ ring-capacity sweep, and the null-sink vs file-sink comparison are in
 
 Reproduce: `cd cross-lang-bench && ./setup.sh && ./run.sh --no-perf`. See [cross-lang-bench](cross-lang-bench/) for details.
 
+### Experimental SPSC backends
+
+The default single-producer ring is the crate-local slot ring. Three
+feature-gated experimental alternates (`backend-ringbuffer`, `backend-ringbuf`,
+`backend-triple-buffer`, mutually exclusive, one crate each) let the
+cross-language harness compare byte-FIFO and single-slot handoff designs on the
+same single-thread pipeline. In the SPSC run (producer on core 0, drain on
+core 1) the `ringbuf` crate backend ties p50 (~15.6 ns) while running ~13-20%
+slower and 1.5-2x worse on p95 tail; the `triple_buffer` backend is a
+ping-pong, not a buffer — `reserve` rendezvouses with the drain every record,
+capping it at ~1M rec/s here. Full numbers, including jitter:
+[cross-lang-bench/BENCHMARKS.md](cross-lang-bench/BENCHMARKS.md).
+
 ## Configuration
 
 `ticklog::configure!` accepts these keys, each optional:

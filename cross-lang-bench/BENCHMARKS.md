@@ -301,6 +301,56 @@ one background thread for reference (8/16-thread runs on this box).
 | 8 | 40.7 | 40.7 | 17.2 |
 | 16 | 40.7 | 40.7 | 17.3 |
 
+## Experimental SPSC Backends (ringbuf crate, triple_buffer crate)
+
+The custom ring stays the default, but the crate ships two experimental
+feature-gated streaming backends plus the ringbuffer-crate backend from
+[e610aa4] for the single-producer/single-drain case:
+
+| Feature               | Backend                                   |
+| --------------------- | ----------------------------------------- |
+| `backend-ringbuffer`  | `ringbuffer` crate byte FIFO              |
+| `backend-ringbuf`     | `ringbuf` crate (`HeapRb`, byte FIFO)     |
+| `backend-triple-buffer`| `triple_buffer` crate single-slot handoff |
+
+The `triple_buffer` backend is fundamentally a **ping-pong, not a buffer**:
+`reserve` rendezvouses with the drain on every record, so it only fits lossy
+uniprocessor slipstreams, never the block/drop hot path ticklog targets. The
+`ringbuf` backend keeps the slot means a real byte FIFO but pays a mutex per
+record enqueue/consume plus a memcpy.
+
+Single-thread (1 producer pinned to CPU 0, drain pinned to CPU 1,
+BATCH=1000, 10M messages per config):
+
+### Latency @ 1 thread (ns)
+
+| Candidate          | workload | p50    | p95    | p99    | p999   | max    |
+| ------------------ | -------- | ------ | ------ | ------ | ------ | ------ |
+| ticklog (custom)   | single_int | 15.2 | 18.3   | 38.3   | 158.9  | 315.1  |
+| ticklog_ringbuf    | single_int | 15.6 | 43.7   | 61.5   | 170.3  | 325.2  |
+| ticklog_triple-buffer | single_int | 718.6 | 1064.9 | 1444.5 | 2352.0 | 10400.4 |
+| ticklog (custom)   | mixed      | 15.9  | 17.6   | 43.6   | 123.5  | 458.6  |
+| ticklog_ringbuf    | mixed      | 16.0  | 33.5   | 75.2   | 211.2  | 2079.8 |
+| ticklog_triple-buffer | mixed   | 841.1 | 1366.4 | 1842.2 | 2600.0 | 10874.9 |
+| ticklog (custom)   | string     | 15.8  | 25.9   | 46.7   | 132.8  | 324.5  |
+| ticklog_ringbuf    | string     | 15.6  | 45.6   | 72.1   | 158.1  | 294.5  |
+| ticklog_triple-buffer | string  | 683.5 | 991.5  | 1331.8 | 2217.4 | 7727.3 |
+
+### Throughput @ 1 thread (rec/s)
+
+| Candidate          | single_int | mixed      | string     |
+| ------------------ | ---------- | ---------- | ---------- |
+| ticklog (custom)   | 60,487,254 | 58,066,093 | 57,610,285 |
+| ticklog_ringbuf    | 52,000,433 | 46,347,031 | 48,938,700 |
+| ticklog_triple-buffer | 1,306,899 | 1,048,392 | 1,364,928 |
+
+Takeaways: the `ringbuf` backend is within ~13-20% of the custom slot ring on
+throughput with equal p50, but its p95 tail is 1.5-2x worse (33-46 ns vs
+18-26 ns). Compare the custom ring against e610aa4's ringbuffer backend and
+the Go/C++ loggers in the tables above. The `triple_buffer` backend's
+reserve/consume handshake caps it at ~1M rec/s here and is unsuitable for
+this benchmark; it is kept only as a data point for lossy slipstream use.
+
 ## Notes
 
 - Numbers are best-effort on an unisolated 16-vCPU WSL2 box (no perf/core isolation).
