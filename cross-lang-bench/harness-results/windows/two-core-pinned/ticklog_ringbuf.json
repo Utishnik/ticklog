@@ -1,0 +1,42 @@
+{
+  "candidate": "ticklog_ringbuf",
+  "os": "windows",
+  "arch": "x86_64",
+  "clock": "rdtsc",
+  "ns_per_tick": 0.313097,
+  "batch_size": 1000,
+  "total_messages": 10000000,
+  "samples": 10000,
+  "results": [
+    {
+      "workload": "single_int",
+      "threads": 1,
+      "throughput": 36178560,
+      "p50": 25.1,
+      "p95": 31.39,
+      "p99": 79.44,
+      "p999": 221.66,
+      "max": 880.39
+    },
+    {
+      "workload": "mixed",
+      "threads": 1,
+      "throughput": 34000849,
+      "p50": 26.83,
+      "p95": 27.42,
+      "p99": 88.21,
+      "p999": 319.96,
+      "max": 1819.16
+    },
+    {
+      "workload": "string",
+      "threads": 1,
+      "throughput": 35248303,
+      "p50": 25.86,
+      "p95": 31.8,
+      "p99": 85.79,
+      "p999": 205.65,
+      "max": 506.59
+    }
+  ]
+}

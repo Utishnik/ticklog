@@ -827,6 +827,9 @@ Ticklog variants: producer pinned core 0, drain pinned core 1. Inline loggers: p
 - Native Windows run: no core isolation, no perf, OS scheduler is Windows'.
   ticklog two-core placement uses --producer-core 0 / --backend-core 1;
   inline loggers (zerolog/zap/quill) ran with process affinity set to core 0.
+- Raw JSON outputs are committed under
+  `harness-results/windows/` (`sweep/` and `two-core-pinned/`), each file
+  tagged `"os": "windows"`.
 - quill shows very high max/p999 tails at 2-16 threads (SPSC queue doubling to
   512 MiB per producer) but remains ~low p50; same pattern as prior runs.
 - ticklog_triple-buffer does not scale (0.92x) -- the triple_buffer crate's

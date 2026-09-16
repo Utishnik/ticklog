@@ -1,0 +1,42 @@
+{
+  "candidate": "ticklog_triple-buffer",
+  "os": "windows",
+  "arch": "x86_64",
+  "clock": "rdtsc",
+  "ns_per_tick": 0.313097,
+  "batch_size": 1000,
+  "total_messages": 10000000,
+  "samples": 10000,
+  "results": [
+    {
+      "workload": "single_int",
+      "threads": 1,
+      "throughput": 1067978,
+      "p50": 873.83,
+      "p95": 1161.29,
+      "p99": 2219.24,
+      "p999": 3514.08,
+      "max": 9363.41
+    },
+    {
+      "workload": "mixed",
+      "threads": 1,
+      "throughput": 735760,
+      "p50": 1269.61,
+      "p95": 1706.54,
+      "p99": 2833.01,
+      "p999": 4601.69,
+      "max": 6443.54
+    },
+    {
+      "workload": "string",
+      "threads": 1,
+      "throughput": 1102836,
+      "p50": 835.35,
+      "p95": 1161.45,
+      "p99": 2238.91,
+      "p999": 3702.88,
+      "max": 14805.47
+    }
+  ]
+}
