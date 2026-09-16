@@ -10,6 +10,7 @@ bin/
 
 # Benchmark outputs
 results/
+results_sp/
 
 # Build artifacts
 *.o
