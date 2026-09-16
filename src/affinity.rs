@@ -63,6 +63,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "Miri does not implement affinity syscalls")]
     fn current_thread_can_pin_to_known_cores() {
         let ids = core_affinity::get_core_ids().unwrap_or_default();
         assert!(!ids.is_empty(), "expected at least one usable core");
@@ -74,6 +75,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "Miri does not implement affinity syscalls")]
     fn invalid_core_does_not_panic() {
         // A core index far beyond any real system must not panic; pin_thread
         // reports it and returns.

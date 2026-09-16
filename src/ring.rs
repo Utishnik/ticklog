@@ -173,6 +173,7 @@ mod custom {
             // zero-filled `Box<[u8]>` and a `Box<[UnsafeCell<u8>]>` of the same
             // length share layout. The cast reinterprets the one heap buffer and
             // preserves the slice length metadata.
+            // todo arena alloc
             let bytes = vec![0u8; capacity].into_boxed_slice();
             let data: Box<[UnsafeCell<u8>]> =
                 unsafe { Box::from_raw(Box::into_raw(bytes) as *mut [UnsafeCell<u8>]) };
@@ -213,6 +214,7 @@ mod custom {
         }
 
         /// Raw pointer to the drain's private `head_cache` slot.
+        ///todo only test use
         #[inline(always)]
         pub(crate) fn head_cache(&self) -> *mut u64 {
             self.drain.head_cache.get()
@@ -271,6 +273,7 @@ mod custom {
             // count toward the space this write needs.
             let wrap = aligned > remaining_phys;
             let needed = if wrap {
+                core::hint::cold_path();
                 aligned + remaining_phys
             } else {
                 aligned
@@ -337,10 +340,14 @@ mod custom {
                 .wrapping_sub(cached)
                 <= self.mask()
             {
+                let tail = self.tail().load(Ordering::Acquire);
+                unsafe { *self.tail_cache() = tail };
                 return true;
             }
 
+            let mut backoff = crate::backoff::Backoff::new();
             loop {
+                core::hint::cold_path();
                 // Refresh from the drain. Acquire pairs with the drain's Release
                 // store of `tail`, so a freed slot's reads complete before the
                 // producer reuses it.
@@ -360,7 +367,9 @@ mod custom {
                         if !self.live.load(Ordering::Relaxed) {
                             return false;
                         }
-                        std::hint::spin_loop();
+                        // Adaptive backoff: pause hints first, then yield to the
+                        // scheduler so the drain thread makes progress.
+                        backoff.wait();
                     }
                 }
             }

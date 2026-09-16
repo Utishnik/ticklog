@@ -87,6 +87,7 @@ impl RingBuffer {
     /// [`Backpressure::Drop`], returns `None` immediately when there is not
     /// enough room.
     pub(crate) fn reserve(&self, total_size: usize, policy: Backpressure) -> Option<Reservation> {
+        let mut backoff = crate::backoff::Backoff::new();
         loop {
             let prod = self.prod.lock().unwrap_or_else(|e| e.into_inner());
             // Leave one byte of slack, mirroring `backend-ringbuffer`, so the
@@ -105,7 +106,7 @@ impl RingBuffer {
                     if !self.live.load(Ordering::Relaxed) {
                         return None;
                     }
-                    std::hint::spin_loop();
+                    backoff.wait();
                 }
             }
         }

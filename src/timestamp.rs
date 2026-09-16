@@ -28,7 +28,10 @@ const FALLBACK_COUNTER_HZ: u64 = 1_000_000_000;
 /// On x86_64 without invariant TSC (e.g. some VMs), warns to stderr and
 /// falls back to timing-based calibration.
 pub(crate) fn calibrate() -> Calibration {
-    #[cfg(target_arch = "x86_64")]
+    // CPUID is inline assembly and unsupported under Miri; there is no real
+    // TSC there, so the invariant check (and the asm counter reads below) are
+    // skipped and the fallback counter is one wall-clock nanosecond per tick.
+    #[cfg(all(target_arch = "x86_64", not(miri)))]
     {
         check_invariant_tsc();
     }
@@ -44,8 +47,12 @@ pub(crate) fn calibrate() -> Calibration {
 
     // Read wall clock first, then counter. The counter read is the fast leg
     // (~0.25-2 ns), so reading it last minimises the cross-reference error.
+    #[cfg(not(miri))]
     let wall_time = SystemTime::now();
     let counter_base = raw_timestamp();
+    #[cfg(miri)]
+    let wall_base_ns = miri_system_time_ns();
+    #[cfg(not(miri))]
     let wall_base_ns = system_time_to_nanos(wall_time);
 
     Calibration {
@@ -65,10 +72,29 @@ fn counter_to_ns_from_freq(freq: u64) -> f64 {
 }
 
 /// Convert `t` to nanoseconds since Unix epoch.
+#[cfg(not(miri))]
 fn system_time_to_nanos(t: SystemTime) -> u64 {
     t.duration_since(UNIX_EPOCH)
         .expect("invariant: system clock is set before the Unix epoch")
         .as_nanos() as u64
+}
+
+/// Wall-clock nanoseconds since the Unix epoch, as seen by Miri.
+///
+/// Under isolation Miri exposes no OS wall clock (Windows blocks
+/// `GetSystemTimePreciseAsFileTime`), so there is no real [`SystemTime`] value
+/// to read. We anchor Miri's virtual [`std::time::Instant`] clock to a fixed
+/// 2026-01-01T00:00:00Z epoch instead: timestamps stay monotonic and format
+/// correctly, they just do not track real wall time.
+#[cfg(miri)]
+fn miri_system_time_ns() -> u64 {
+    use std::sync::OnceLock;
+    static START: OnceLock<std::time::Instant> = OnceLock::new();
+    // 2026-01-01T00:00:00Z. 2026-01-01 minus Unix epoch: 56 years with 14 leap
+    // days = 56*365 + 14 = 20454 days = 20454 * 86400 * 1e9 ns.
+    const EPOCH_2026_NS: u64 = 20_454 * 86_400 * 1_000_000_000;
+    let anchor = *START.get_or_init(std::time::Instant::now);
+    EPOCH_2026_NS + anchor.elapsed().as_nanos() as u64
 }
 
 /// Convert a raw hardware counter value to nanoseconds since the Unix epoch.
@@ -84,27 +110,32 @@ pub(crate) fn ticks_to_ns(tick: u64, calib: &Calibration) -> u64 {
 /// Read the platform-specific monotonic hardware counter.
 #[inline]
 pub(crate) fn raw_timestamp() -> u64 {
-    #[cfg(target_arch = "x86_64")]
+    // The asm counter reads are not supported under Miri; under Miri the
+    // fallback returns wall-clock nanoseconds, so one tick equals one ns.
+    #[cfg(all(target_arch = "x86_64", not(miri)))]
     {
         // SAFETY: this arm compiles only on x86_64, where the RDTSC instruction
         // read by `_raw_timestamp_x86` is always available; it has no other
         // precondition.
         unsafe { _raw_timestamp_x86() }
     }
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(target_arch = "aarch64", not(miri)))]
     {
         // SAFETY: this arm compiles only on aarch64, where the CNTVCT_EL0 system
         // register read by `_raw_timestamp_aarch64` is always available; it has
         // no other precondition.
         unsafe { _raw_timestamp_aarch64() }
     }
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    #[cfg(not(any(
+        all(target_arch = "x86_64", not(miri)),
+        all(target_arch = "aarch64", not(miri))
+    )))]
     {
         _raw_timestamp_fallback()
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", not(miri)))]
 #[inline]
 unsafe fn _raw_timestamp_x86() -> u64 {
     // SAFETY: RDTSC is available on every x86_64 processor. It reads the
@@ -122,7 +153,7 @@ unsafe fn _raw_timestamp_x86() -> u64 {
     ((hi as u64) << 32) | (lo as u64)
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", not(miri)))]
 fn check_invariant_tsc() {
     // SAFETY: CPUID is available on all x86_64 processors. Leaf 0x80000007
     // returns feature flags in EDX; bit 8 indicates invariant TSC support.
@@ -134,7 +165,7 @@ fn check_invariant_tsc() {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", not(miri)))]
 fn counter_frequency() -> u64 {
     // CPUID leaf 0x15 sub-leaf 0 enumerates the TSC as a ratio over the
     // core-crystal clock. Available on Intel Skylake+ and AMD Zen 2+; other
@@ -163,7 +194,7 @@ fn counter_frequency() -> u64 {
 /// value (e.g. pre-Skylake, or a hypervisor that leaves the ratio blank), so the
 /// frequency cannot be derived here; returns `None` and the caller falls back to
 /// timing calibration.
-#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
+#[cfg(all(target_arch = "x86_64", not(miri)))]
 fn tsc_freq_from_cpuid_0x15(eax: u32, ebx: u32, ecx: u32) -> Option<u64> {
     let denominator = eax as u64;
     let numerator = ebx as u64;
@@ -177,7 +208,7 @@ fn tsc_freq_from_cpuid_0x15(eax: u32, ebx: u32, ecx: u32) -> Option<u64> {
     Some(crystal_hz.saturating_mul(numerator) / denominator)
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(target_arch = "aarch64", not(miri)))]
 #[inline]
 unsafe fn _raw_timestamp_aarch64() -> u64 {
     let counter: u64;
@@ -195,7 +226,7 @@ unsafe fn _raw_timestamp_aarch64() -> u64 {
     counter
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(target_arch = "aarch64", not(miri)))]
 fn counter_frequency() -> u64 {
     let freq: u64;
     // SAFETY: CNTFRQ_EL0 is a read-only register that reports the fixed
@@ -211,13 +242,33 @@ fn counter_frequency() -> u64 {
     freq
 }
 
-#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[cfg(not(any(
+    all(target_arch = "x86_64", not(miri)),
+    all(target_arch = "aarch64", not(miri))
+)))]
 #[inline]
 fn _raw_timestamp_fallback() -> u64 {
-    system_time_to_nanos(SystemTime::now())
+    #[cfg(miri)]
+    {
+        miri_system_time_ns()
+    }
+    #[cfg(not(miri))]
+    {
+        system_time_to_nanos(SystemTime::now())
+    }
 }
 
-#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+/// Under Miri the hardware counter is not readable, so `raw_timestamp()`
+/// returns wall-clock nanoseconds directly: one tick equals one nanosecond.
+#[cfg(miri)]
+fn counter_frequency() -> u64 {
+    1_000_000_000
+}
+
+#[cfg(all(
+    not(miri),
+    not(any(target_arch = "x86_64", target_arch = "aarch64"))
+))]
 fn counter_frequency() -> u64 {
     // Fallback: raw_timestamp() returns nanoseconds directly, so 1 tick = 1 ns.
     1_000_000_000
@@ -225,7 +276,7 @@ fn counter_frequency() -> u64 {
 
 /// Estimate the counter frequency by measuring elapsed ticks against wall-clock
 /// time over a short sleep interval.
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", not(miri)))]
 fn timing_calibrate_frequency() -> u64 {
     // Spin briefly to warm up. The first RDTSC can be slow on some CPUs.
     let _warm = raw_timestamp();
@@ -408,6 +459,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(target_arch = "x86_64", not(miri)))]
     fn tsc_freq_scales_crystal_by_ratio() {
         // Synthetic Skylake-style leaf 0x15: 24 MHz crystal, ratio 250/2.
         // TSC = crystal * numerator / denominator = 24_000_000 * 250 / 2
@@ -419,6 +471,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(target_arch = "x86_64", not(miri)))]
     fn tsc_freq_none_when_any_register_zero() {
         // Any of denominator (EAX), numerator (EBX), or crystal (ECX) being 0
         // means the value was not enumerated -> derivation impossible -> None,

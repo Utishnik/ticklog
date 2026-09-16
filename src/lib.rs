@@ -159,6 +159,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 mod affinity;
+mod backoff;
 #[cfg(feature = "backend-ringbuffer")]
 mod ringbuffer_backend;
 #[cfg(feature = "backend-ringbuf")]

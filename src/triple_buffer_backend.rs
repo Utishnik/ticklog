@@ -102,6 +102,7 @@ impl RingBuffer {
     /// against a dead drain.
     pub(crate) fn reserve(&self, _total_size: usize, _policy: Backpressure) -> Option<Reservation> {
         debug_assert!(_total_size <= crate::record::MAX_RECORD_SIZE);
+        let mut backoff = crate::backoff::Backoff::new();
         loop {
             let input = self.input.lock().unwrap_or_else(|e| e.into_inner());
             if input.consumed() {
@@ -115,7 +116,7 @@ impl RingBuffer {
             if !self.live.load(Ordering::Relaxed) {
                 return None;
             }
-            std::hint::spin_loop();
+            backoff.wait();
         }
     }
 
