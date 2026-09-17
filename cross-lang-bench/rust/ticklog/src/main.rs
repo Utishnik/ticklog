@@ -13,7 +13,7 @@ use std::process;
 use std::sync::{Arc, Barrier};
 use std::thread;
 use serde::Serialize;
-use ticklog::{info, FileSink, Level, LogSink};
+use ticklog::{info, Backpressure, FileSink, Level, LogSink};
 
 // Constants (must match the design doc)
 /// Number of log calls between counter reads.
@@ -467,6 +467,7 @@ fn main() {
         max_level: Level::Trace,
         drain_affinity: drain_affinity,
         ring_capacity: cfg.ring_capacity,
+        backpressure: Backpressure::Block,
     }
     .expect("ticklog build");
     std::mem::forget(guard);
