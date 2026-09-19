@@ -22,7 +22,7 @@
 //!   bound, which some ring implementations treat as an overwrite condition.
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use ringbuf::traits::{Consumer as _, Observer as _, Producer as _, Split};
 
@@ -40,6 +40,11 @@ pub(crate) struct RingBuffer {
     pub(crate) live: AtomicBool,
     /// Declared capacity (must be a power of two and at least one slot).
     capacity: usize,
+    /// Stable thread id of this ring's producer, set at registration (see
+    /// [`RingBuffer::set_thread_info`]). Records carry no thread bytes.
+    thread_id: AtomicU64,
+    /// Producer thread name, set at registration.
+    thread_name: Mutex<String>,
 }
 
 // SAFETY: `HeapProd`/`HeapCons` are Send (they share the storage through an
@@ -74,8 +79,32 @@ impl RingBuffer {
             prod: Mutex::new(prod),
             cons: Mutex::new(cons),
             live: AtomicBool::new(true),
+            thread_id: AtomicU64::new(0),
+            thread_name: Mutex::new(String::new()),
             capacity,
         }
+    }
+
+    /// Records this ring's producer identity. See [`crate::ring`]'s custom
+    /// backend for the rationale; the FIFO backends mirror it so
+    /// [`crate::thread_buf`] and the drain share one interface.
+    pub(crate) fn set_thread_info(&self, thread_id: u64, thread_name: &str) {
+        self.thread_id.store(thread_id, Ordering::Relaxed);
+        let mut guard = self.thread_name.lock().unwrap_or_else(|e| e.into_inner());
+        *guard = thread_name.to_string();
+    }
+
+    /// Identity used by the drain when formatting this ring's records.
+    pub(crate) fn thread_id(&self) -> u64 {
+        self.thread_id.load(Ordering::Relaxed)
+    }
+
+    /// Identity used by the drain when formatting this ring's records.
+    pub(crate) fn thread_name(&self) -> String {
+        self.thread_name
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Reserves space for a record of `total_size` bytes.

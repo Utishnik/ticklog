@@ -27,7 +27,13 @@ const SAMPLES: usize = 10_000;
 /// locals can never reach it; the policy therefore rides on a Cargo feature
 /// and is echoed here so the runtime is configured identically.
 fn policy() -> Backpressure {
-    if cfg!(feature = "policy-quill") {
+    if cfg!(feature = "policy-fastwm") {
+        Backpressure::Quill
+    } else if cfg!(feature = "policy-watermark") {
+        Backpressure::Quill
+    } else if cfg!(feature = "policy-fast") {
+        Backpressure::Quill
+    } else if cfg!(feature = "policy-quill") {
         Backpressure::Quill
     } else if cfg!(feature = "policy-nanolog") {
         Backpressure::NanoLog
@@ -42,7 +48,13 @@ fn policy() -> Backpressure {
 #[allow(non_local_definitions)]
 macro_rules! __ticklog_backpressure {
     () => {
-        if cfg!(feature = "policy-quill") {
+        if cfg!(feature = "policy-fastwm") {
+            ticklog::Backpressure::Quill
+        } else if cfg!(feature = "policy-watermark") {
+            ticklog::Backpressure::Quill
+        } else if cfg!(feature = "policy-fast") {
+            ticklog::Backpressure::Quill
+        } else if cfg!(feature = "policy-quill") {
             ticklog::Backpressure::Quill
         } else if cfg!(feature = "policy-nanolog") {
             ticklog::Backpressure::NanoLog

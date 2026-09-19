@@ -1,0 +1,162 @@
+{
+  "candidate": "ticklog-fastwm",
+  "os": "linux",
+  "arch": "x86_64",
+  "clock": "rdtsc",
+  "ns_per_tick": 0.313148759,
+  "batch_size": 1000,
+  "total_messages": 1000000,
+  "samples": 1000,
+  "results": [
+    {
+      "workload": "single_int",
+      "threads": 1,
+      "throughput": 8267653,
+      "p50": 19.49,
+      "p95": 35.06,
+      "p99": 110.57,
+      "p999": 28336.82,
+      "max": 29714.84
+    },
+    {
+      "workload": "mixed",
+      "threads": 1,
+      "throughput": 7965369,
+      "p50": 39.45,
+      "p95": 45.76,
+      "p99": 121.4,
+      "p999": 27938.91,
+      "max": 28084.91
+    },
+    {
+      "workload": "string",
+      "threads": 1,
+      "throughput": 8010519,
+      "p50": 21.17,
+      "p95": 40.6,
+      "p99": 99.35,
+      "p999": 29459.84,
+      "max": 33217.43
+    },
+    {
+      "workload": "single_int",
+      "threads": 2,
+      "throughput": 18033836,
+      "p50": 27.05,
+      "p95": 36.46,
+      "p99": 111.96,
+      "p999": 30521.81,
+      "max": 30757.42
+    },
+    {
+      "workload": "mixed",
+      "threads": 2,
+      "throughput": 13061052,
+      "p50": 38.46,
+      "p95": 54.76,
+      "p99": 105.94,
+      "p999": 29808.94,
+      "max": 33871.75
+    },
+    {
+      "workload": "string",
+      "threads": 2,
+      "throughput": 8013073,
+      "p50": 34.06,
+      "p95": 40.68,
+      "p99": 95.62,
+      "p999": 57436.79,
+      "max": 59752.9
+    },
+    {
+      "workload": "single_int",
+      "threads": 4,
+      "throughput": 12193322,
+      "p50": 40.87,
+      "p95": 80.08,
+      "p99": 140.72,
+      "p999": 334.5,
+      "max": 1148.62
+    },
+    {
+      "workload": "mixed",
+      "threads": 4,
+      "throughput": 13357674,
+      "p50": 39.07,
+      "p95": 82.39,
+      "p99": 133.91,
+      "p999": 306.74,
+      "max": 615.48
+    },
+    {
+      "workload": "string",
+      "threads": 4,
+      "throughput": 20040276,
+      "p50": 44.63,
+      "p95": 72.31,
+      "p99": 138.1,
+      "p999": 243.71,
+      "max": 250.54
+    },
+    {
+      "workload": "single_int",
+      "threads": 8,
+      "throughput": 18789739,
+      "p50": 74.86,
+      "p95": 134.3,
+      "p99": 277.84,
+      "p999": 536.78,
+      "max": 1231.0
+    },
+    {
+      "workload": "mixed",
+      "threads": 8,
+      "throughput": 21041612,
+      "p50": 74.12,
+      "p95": 154.24,
+      "p99": 242.46,
+      "p999": 482.87,
+      "max": 1226.74
+    },
+    {
+      "workload": "string",
+      "threads": 8,
+      "throughput": 19496288,
+      "p50": 73.15,
+      "p95": 160.18,
+      "p99": 303.28,
+      "p999": 918.86,
+      "max": 1277.24
+    },
+    {
+      "workload": "single_int",
+      "threads": 16,
+      "throughput": 13111617,
+      "p50": 127.31,
+      "p95": 266.38,
+      "p99": 364.74,
+      "p999": 4254.78,
+      "max": 4254.78
+    },
+    {
+      "workload": "mixed",
+      "threads": 16,
+      "throughput": 10099682,
+      "p50": 114.14,
+      "p95": 227.2,
+      "p99": 379.57,
+      "p999": 3081.55,
+      "max": 3081.55
+    },
+    {
+      "workload": "string",
+      "threads": 16,
+      "throughput": 8337498,
+      "p50": 116.13,
+      "p95": 228.67,
+      "p99": 387.97,
+      "p999": 2222.7,
+      "max": 2222.7
+    }
+  ]
+}

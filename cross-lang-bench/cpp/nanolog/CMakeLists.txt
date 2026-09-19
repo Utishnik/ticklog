@@ -5,12 +5,16 @@ project(nanolog_harness LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Host-native, maximum-performance build. NanoLog's runtime keeps
+# exceptions enabled (it uses them), so no -fno-exceptions here.
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -flto -fomit-frame-pointer")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g")
 
-# setup.sh fetches NanoLog into ../NanoLog/ and builds the runtime via
-# `make -C ../NanoLog/runtime/`. The runner passes -DNANOLOG_RUNTIME_DIR
-# pointing at the built runtime.
+# The NanoLog runtime is fetched and built separately (see setup.sh). On
+# case-insensitive filesystems (NTFS via WSL) cpp/nanolog and cpp/NanoLog
+# collide, so the runtime lives in $HOME/NanoLog and is passed here.
 if(NOT DEFINED NANOLOG_RUNTIME_DIR)
     set(NANOLOG_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../NanoLog/runtime")
 endif()

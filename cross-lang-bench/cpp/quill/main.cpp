@@ -30,9 +30,29 @@
 // -- Constants (must match the design doc) ------------------------------
 
 static constexpr int BATCH = 1000;
-static constexpr int SAMPLES = 10'000;
-static constexpr uint64_t TOTAL_MESSAGES = static_cast<uint64_t>(SAMPLES) * BATCH;
+static int g_samples = 10'000;
+static uint64_t g_total_messages = static_cast<uint64_t>(g_samples) * BATCH;
 static constexpr int THREAD_COUNTS[] = {1, 2, 4, 8, 16};
+
+// -- Custom frontend options -------------------------------------------
+//
+// The per-thread SPSC queue is sized to the buffer budget passed at build
+// time via QUILL_BENCH_QUEUE_CAPACITY. initial_queue_capacity equals
+// unbounded_queue_max_capacity so the queue stays a fixed-size ring:
+// it cannot self-double past the budget (Run 3 OOM hazard) and never
+// reallocates mid-burst.
+
+#ifndef QUILL_BENCH_QUEUE_CAPACITY
+#  define QUILL_BENCH_QUEUE_CAPACITY (64u * 1024u * 1024u)
+#endif
+
+struct BenchFrontendOptions : quill::FrontendOptions
+{
+    static constexpr size_t initial_queue_capacity = QUILL_BENCH_QUEUE_CAPACITY;
+    static constexpr size_t unbounded_queue_max_capacity = QUILL_BENCH_QUEUE_CAPACITY;
+};
+
+using BenchFrontend = quill::FrontendImpl<BenchFrontendOptions>;
 
 // -- Platform counter ---------------------------------------------------
 
@@ -76,7 +96,7 @@ Workload ALL_WORKLOADS[] = {Workload::SingleInt, Workload::Mixed, Workload::Stri
 // run_batch executes BATCH log calls against the provided logger.
 // call_index varies across the run so the compiler cannot constant-fold
 // the log site.
-static void run_batch(quill::Logger* logger, Workload wl, uint64_t call_index) {
+static void run_batch(BenchFrontend::logger_t* logger, Workload wl, uint64_t call_index) {
     switch (wl) {
         case Workload::SingleInt:
             for (int i = 0; i < BATCH; i++) {
@@ -145,7 +165,7 @@ struct Output {
 // measure_config runs one (workload, thread_count) configuration and
 // returns the measured percentiles and throughput.
 static ConfigResult measure_config(double ns_per_tick, Workload wl, int n_threads) {
-    int samples_per_thread = SAMPLES / n_threads;
+    int samples_per_thread = g_samples / n_threads;
 
     // Per-thread latency storage.
     std::vector<std::vector<double>> latencies(static_cast<size_t>(n_threads));
@@ -165,12 +185,11 @@ static ConfigResult measure_config(double ns_per_tick, Workload wl, int n_thread
     for (int t = 0; t < n_threads; t++) {
         threads.emplace_back([&, t, samples_per_thread]() {
             // Pre-allocate thread-local SPSC queue.
-            quill::Frontend::preallocate();
+            BenchFrontend::preallocate();
 
             // Create a logger backed by NullSink.
-            auto null_sink = quill::Frontend::create_or_get_sink<quill::NullSink>("null");
-            quill::Logger* logger = quill::Frontend::create_or_get_logger(
-                "root", std::move(null_sink));
+            auto null_sink = BenchFrontend::create_or_get_sink<quill::NullSink>("null");
+            auto* logger = BenchFrontend::create_or_get_logger("root", std::move(null_sink));
 
             // Warmup: drive enough log calls to let the SPSC queue resize
             // to its steady-state capacity.
@@ -213,7 +232,7 @@ static ConfigResult measure_config(double ns_per_tick, Workload wl, int n_thread
     auto wall_end = std::chrono::steady_clock::now();
     double wall_duration_s = std::chrono::duration<double>(wall_end - wall_start).count();
     uint64_t throughput = static_cast<uint64_t>(std::round(
-        static_cast<double>(TOTAL_MESSAGES) / wall_duration_s));
+        static_cast<double>(g_total_messages) / wall_duration_s));
 
     // Merge all per-thread slices into a single sorted vector.
     size_t total = 0;
@@ -328,20 +347,26 @@ int main(int argc, char* argv[]) {
             ns_per_tick_flag = std::strtod(argv[++i], nullptr);
         } else if (std::strcmp(argv[i], "--output") == 0 && i + 1 < argc) {
             output_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--samples") == 0 && i + 1 < argc) {
+            g_samples = std::atoi(argv[++i]);
+            g_total_messages = static_cast<uint64_t>(g_samples) * BATCH;
         } else {
             std::fprintf(stderr, "error: unknown flag '%s'\n", argv[i]);
-            std::fprintf(stderr, "usage: quill_harness --ns-per-tick <float> --output <path.json>\n");
+            std::fprintf(stderr, "usage: quill_harness --ns-per-tick <float> --output <path.json> [--samples <int>]\n");
             return 1;
         }
     }
 
     if (!output_path) {
         std::fprintf(stderr, "error: --output is required\n");
-        std::fprintf(stderr, "usage: quill_harness --ns-per-tick <float> --output <path.json>\n");
+        std::fprintf(stderr, "usage: quill_harness --ns-per-tick <float> --output <path.json> [--samples <int>]\n");
         return 1;
     }
 
     double ns_per_tick = resolve_ns_per_tick(ns_per_tick_flag);
+
+    std::fprintf(stderr, "queue_capacity_bytes=%llu samples=%d batch=%d\n",
+        static_cast<unsigned long long>(QUILL_BENCH_QUEUE_CAPACITY), g_samples, BATCH);
 
     // Start the Quill backend thread. It processes the SPSC queues and
     // hands log statements to sinks (our NullSink discards them).
@@ -388,8 +413,8 @@ int main(int argc, char* argv[]) {
     out.clock = clock_name;
     out.ns_per_tick = ns_per_tick;
     out.batch_size = BATCH;
-    out.total_messages = TOTAL_MESSAGES;
-    out.samples = SAMPLES;
+    out.total_messages = g_total_messages;
+    out.samples = g_samples;
     out.results = std::move(results);
 
     write_output(out, output_path);

@@ -19,6 +19,14 @@ backend-triple-buffer = ["ticklog/backend-triple-buffer"]
 policy-block = []
 policy-nanolog = []
 policy-quill = []
+# Per-thread-ring fast path: quill-style cached reader position (the producer
+# never loads the drain's tail on the hot path). Uses the Quill policy.
+policy-fast = ["policy-quill", "ticklog/fast-tail-cache"]
+# Watermark-batched `head` publish (one drain-facing store per 1000 records
+# instead of per record). Uses the Quill policy.
+policy-watermark = ["policy-quill", "ticklog/watermark-head"]
+# Fast-tail-cache + watermark-batched publish combined.
+policy-fastwm = ["policy-fast", "ticklog/watermark-head"]
 
 [profile.release]
 lto = "fat"

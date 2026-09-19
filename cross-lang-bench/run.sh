@@ -154,6 +154,19 @@ if [[ -n "$CPU_CORE" && -n "$DRAIN_CORE" ]]; then
         "--candidate ticklog_ringbuf --producer-core $CPU_CORE --backend-core $DRAIN_CORE"
     run_one "ticklog_triple-buffer" "bin/ticklog_triple_buffer_harness" \
         "--candidate 'ticklog_triple-buffer' --producer-core $CPU_CORE --backend-core $DRAIN_CORE"
+    # Every non-Block back-pressure policy from ticklog, as separate
+    # prebuilt harnesses (see setup.sh). Policy is chosen at build time
+    # via cargo feature; there are no runtime flags for it.
+    run_one "ticklog_fastwm" "bin/ticklog_policy_fastwm_harness" \
+        "--candidate ticklog_fastwm --producer-core $CPU_CORE --backend-core $DRAIN_CORE"
+    run_one "ticklog_watermark" "bin/ticklog_policy_watermark_harness" \
+        "--candidate ticklog_watermark --producer-core $CPU_CORE --backend-core $DRAIN_CORE"
+    run_one "ticklog_fast" "bin/ticklog_policy_fast_harness" \
+        "--candidate ticklog_fast --producer-core $CPU_CORE --backend-core $DRAIN_CORE"
+    run_one "ticklog_quill" "bin/ticklog_policy_quill_harness" \
+        "--candidate ticklog_quill --producer-core $CPU_CORE --backend-core $DRAIN_CORE"
+    run_one "ticklog_nanolog" "bin/ticklog_policy_nanolog_harness" \
+        "--candidate ticklog_nanolog --producer-core $CPU_CORE --backend-core $DRAIN_CORE"
     # Restore single-core pinning for inline loggers
     PIN_PREFIX="taskset -c $CPU_CORE"
 else
@@ -162,6 +175,17 @@ else
         "--candidate ticklog_ringbuf --threads 1,2,4,8,16"
     run_one "ticklog_triple-buffer" "bin/ticklog_triple_buffer_harness" \
         "--candidate 'ticklog_triple-buffer' --threads 1,2,4,8,16"
+    # Every non-Block back-pressure policy as a separate prebuilt harness.
+    run_one "ticklog_policy_fastwm" "bin/ticklog_policy_fastwm_harness" \
+        "--candidate ticklog_policy_fastwm --threads 1,2,4,8,16"
+    run_one "ticklog_policy_watermark" "bin/ticklog_policy_watermark_harness" \
+        "--candidate ticklog_policy_watermark --threads 1,2,4,8,16"
+    run_one "ticklog_policy_fast" "bin/ticklog_policy_fast_harness" \
+        "--candidate ticklog_policy_fast --threads 1,2,4,8,16"
+    run_one "ticklog_policy_quill" "bin/ticklog_policy_quill_harness" \
+        "--candidate ticklog_policy_quill --threads 1,2,4,8,16"
+    run_one "ticklog_policy_nanolog" "bin/ticklog_policy_nanolog_harness" \
+        "--candidate ticklog_policy_nanolog --threads 1,2,4,8,16"
 fi
 
 run_one "zerolog"  "bin/zerolog_harness"

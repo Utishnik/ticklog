@@ -186,6 +186,7 @@ pub use builder::Backpressure;
 pub use error::TicklogError;
 pub use guard::Guard;
 pub use level::Level;
+pub use record::Site;
 pub use sink::{
     ColorMode, ConsoleSink, FanOut, FileSink, LogSink, LogSinkExt, WithLevel, WriterSink,
 };

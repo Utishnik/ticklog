@@ -36,6 +36,23 @@ backend-ringbuf = ["dep:ringbuf", "fifo-backend"]
 backend-triple-buffer = ["dep:triple_buffer", "fifo-backend"]
 fifo-backend = []
 
+# Quill-style cached reader position: the producer's capacity check trusts a
+# possibly-stale cache of the drain's tail and never loads the drain's cache
+# line on the fast path. The real tail is refreshed only when the cache says
+# the ring is near full. Occupancy computed from a stale tail is conservative
+# (real tail >= cached), so the producer can never overwrite a slot the drain
+# has not consumed. Benchmark-only; not part of the default configuration.
+fast-tail-cache = []
+
+# Benchmark-only: the producer publishes its write position to the drain as a
+# lagging `head` watermark once per `WATERMARK_HEAD_RECORDS` publishes instead
+# of per record, removing the per-record producer<->drain cache-line ping-pong
+# on `head`. `reserve` bookkeeping uses a producer-private position; the
+# watermark is flushed on every segment handoff, so the drain lags by at most
+# one watermark and never loses records. Not part of the default
+# configuration.
+watermark-head = []
+
 [dev-dependencies]
 criterion = {version = "0.5", features = ["html_reports"]}
 env_logger = "0.11"

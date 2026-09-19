@@ -11,7 +11,7 @@ use crate::encode::{FIXED_SIZES, TAG_COUNT, TAG_STR};
 use crate::format::{self, Field, FormatSpec, Segment, Template};
 use crate::level::Level;
 use crate::record::{
-    END_OF_BUFFER, FLAG_COMPLEX, FLAG_FORMAT, FLAG_PROCESS, FLAG_SOURCE, FLAG_THREAD, HEADER_SIZE,
+    END_OF_BUFFER, FLAG_COMPLEX, FLAG_PROCESS, FLAG_SITE, FLAG_SOURCE, FLAG_THREAD, HEADER_SIZE,
     LOG_RECORD, VERSION,
 };
 use crate::ring::RingBuffer;
@@ -673,6 +673,22 @@ fn drain_ring_inner(
     line_pattern: &Template,
     buf: &mut Vec<u8>,
 ) -> bool {
+    #[cfg(feature = "watermark-head")]
+    {
+        // The producer may have exited with records unpublished past the last
+        // `head` watermark. `live = false` is stored with Release after the
+        // producer's final publish, so the Acquire load below orders that
+        // store (making the producer-private position safe to read) and this
+        // flush publishes the tail so no record is lost.
+        if !ring.live.load(Ordering::Acquire) {
+            ring.flush_watermark();
+        }
+    }
+    // Thread identity lives on the ring (registered once per incarnation),
+    // never in the records. Snapshot it once per pass — a cheap atomic load
+    // plus one small-string clone — so formatting needs no per-record lock.
+    let ring_thread_id = ring.thread_id();
+    let ring_thread_name = ring.thread_name();
     let capacity = ring.capacity();
     let mask = (capacity - 1) as u64;
     // Own index: Relaxed load; the drain is the sole writer of `tail`.
@@ -746,7 +762,15 @@ fn drain_ring_inner(
             .unwrap_or(Level::Error);
 
         buf.clear();
-        decode_and_format(record, timezone_offset, calibration, line_pattern, buf);
+        decode_and_format(
+            record,
+            timezone_offset,
+            calibration,
+            line_pattern,
+            ring_thread_id,
+            &ring_thread_name,
+            buf,
+        );
         match sink.as_mut() {
             Some(s) => {
                 if let Err(e) = s.accept(buf, level) {
@@ -830,7 +854,15 @@ fn drain_ring(
             .unwrap_or(Level::Error);
 
         buf.clear();
-        decode_and_format(record, timezone_offset, calibration, line_pattern, buf);
+        decode_and_format(
+            record,
+            timezone_offset,
+            calibration,
+            line_pattern,
+            ring.thread_id(),
+            &ring.thread_name(),
+            buf,
+        );
         if let Err(e) = sink.accept(buf, level) {
             eprintln!("ticklog: sink accept failed: {}", e);
         }
@@ -856,6 +888,8 @@ fn decode_and_format(
     timezone_offset: i32,
     calibration: &Calibration,
     line_pattern: &Template,
+    ring_thread_id: u64,
+    ring_thread_name: &str,
     buf: &mut Vec<u8>,
 ) {
     // SAFETY: `record.as_ptr()` starts a validated record slice of length
@@ -881,26 +915,23 @@ fn decode_and_format(
 
     // Step 3: flagged sections, in fixed order.
     let mut fmt: &str = "";
-    if flags & FLAG_FORMAT != 0 {
-        // SAFETY: the format section is 10 bytes (u64 ptr + u16 len) present
-        // when FLAG_FORMAT is set.
-        let (fmt_ptr, fmt_len) = unsafe {
-            let p = std::ptr::with_exposed_provenance::<u8>(c.read_u64() as usize);
-            let l = c.read_u16() as usize;
-            (p, l)
-        };
-        // SAFETY: fmt_ptr/fmt_len are the address and length of the format
-        // string. The logging macro accepts only a string literal, so the
-        // format string is always a &'static str in the binary's read-only
-        // data (valid for the whole process, this drain thread included) and
-        // the producer wrote fmt.len() as the u16 length, so this reads exactly
-        // that string's bytes. No runtime pointer check is needed: no API path
-        // can place a non-static pointer here.
-        let fmt_bytes = unsafe { std::slice::from_raw_parts(fmt_ptr, fmt_len) };
-        fmt = std::str::from_utf8(fmt_bytes).unwrap_or("");
-    }
-    // Read source and thread sections (defer rendering until both are known).
     let mut file_line: Option<(&str, u32)> = None;
+    if flags & FLAG_SITE != 0 {
+        // SAFETY: the site section is an 8-byte pointer to a promoted
+        // `&'static Site` descriptor, present when FLAG_SITE is set.
+        // The logging macro constructs the descriptor inline, constant
+        // promotion freezes it in read-only data, and the pointer it writes is
+        // that frozen address (valid for the whole process), so dereferencing
+        // here is sound regardless of which thread produced the record.
+        let site_ptr = unsafe { c.read_u64() as *const crate::record::Site };
+        // SAFETY: `site_ptr` points at a valid `Site` (see above: the pointer
+        // was created from `&Site` by the macro, valid for `'static`).
+        let site = unsafe { &*site_ptr };
+        fmt = site.fmt;
+        file_line = Some((site.file, site.line));
+    }
+    // Read source section (legacy wire) and thread section (legacy wire),
+    // deferring rendering until all identity is known.
     if flags & FLAG_SOURCE != 0 {
         // SAFETY: the source section is 14 bytes (u64 ptr + u16 len + u32 line)
         // present when FLAG_SOURCE is set.
@@ -916,14 +947,18 @@ fn decode_and_format(
         let file = std::str::from_utf8(file_bytes).unwrap_or("<file>");
         file_line = Some((file, line));
     }
-    let mut thread_id: u64 = 0;
-    let mut thread_name: Option<String> = None;
+    // Thread identity defaults to the ring's registration (the fast path
+    // writes no thread bytes); a legacy wire record may override it with an
+    // in-band thread section. The override is owned so its borrow of `c`
+    // ends here (the legacy path is cold; the fast path never allocates).
+    let mut thread_id: u64 = ring_thread_id;
+    let mut thread_name_override: Option<String> = None;
     if flags & FLAG_THREAD != 0 {
         // SAFETY: the thread section is an 8-byte id followed by a
         // length-prefixed name, all within the record slice.
         unsafe {
             thread_id = c.read_u64();
-            thread_name = {
+            thread_name_override = {
                 let (name_bytes, name_len) = c.read_len_prefixed();
                 if name_len > 0 {
                     std::str::from_utf8(name_bytes).ok().map(String::from)
@@ -933,6 +968,9 @@ fn decode_and_format(
             };
         }
     }
+    // Rendering borrows the chosen name (the local override or the ring's);
+    // neither borrows `c`, so `&mut c` below is unaliased.
+    let thread_name: Option<&str> = thread_name_override.as_deref().or(Some(ring_thread_name));
     if flags & FLAG_PROCESS != 0 {
         // SAFETY: the process section is a 4-byte pid.
         unsafe {
@@ -1127,9 +1165,7 @@ mod tests {
     use super::*;
     use crate::builder::DEFAULT_LINE_PATTERN;
     use crate::encode::{TAG_BOOL, TAG_F64, TAG_I64, TAG_U16, TAG_U64};
-    use crate::record::{
-        FORMAT_SECTION_SIZE, HEADER_SIZE, LOG_RECORD, THREAD_SECTION_BASE_SIZE, VERSION,
-    };
+    use crate::record::{HEADER_SIZE, LOG_RECORD, SITE_SECTION_SIZE, Site, VERSION};
     use std::io;
     use std::sync::{Mutex, OnceLock};
 
@@ -1165,35 +1201,86 @@ mod tests {
         (TAG_STR, v)
     }
 
-    /// Builds a full encoded LOG_RECORD.
+    /// A promoted call-site descriptor for the wire: leak a `Site` so the
+    /// test record's pointer stays valid for the whole process (the real
+    /// producer relies on constant promotion; a leak is the test-only
+    /// equivalent, and the boxes are tiny).
+    fn site_of(fmt: &'static str, file: &'static str, line: u32) -> &'static Site {
+        Box::leak(Box::new(Site { fmt, file, line }))
+    }
+
+    /// Builds a full encoded LOG_RECORD in the fast-path layout: a header
+    /// plus a `FLAG_SITE` pointer to a promoted call-site descriptor, then
+    /// count, tags, and payloads. This is the wire format the producer's
+    /// logging macros emit today.
     fn build_record(
         level: Level,
         timestamp: u64,
-        fmt: &'static str,
+        site: &'static Site,
+        args: &[(u8, Vec<u8>)],
+    ) -> Vec<u8> {
+        let flags: u16 = FLAG_SITE;
+
+        let mut payload: Vec<u8> = Vec::new();
+
+        // Site section: one pointer to the frozen call-site descriptor.
+        payload.extend_from_slice(&(site as *const Site as u64).to_le_bytes());
+
+        // Arguments.
+        payload.push(args.len() as u8);
+        for (tag, _) in args {
+            payload.push(*tag);
+        }
+        for (_, data) in args {
+            payload.extend_from_slice(data);
+        }
+
+        let total_size = (HEADER_SIZE + payload.len()) as u16;
+
+        let mut record = Vec::with_capacity(total_size as usize);
+        record.push(VERSION); // version
+        record.push(LOG_RECORD); // type
+        record.extend_from_slice(&total_size.to_le_bytes());
+        record.push(level.to_u8());
+        record.extend_from_slice(&flags.to_le_bytes());
+        record.push(0); // _pad
+        record.extend_from_slice(&timestamp.to_le_bytes());
+        record.extend_from_slice(&payload);
+        record
+    }
+
+    /// Builds a LOG_RECORD with the fast-path SITE section plus legacy
+    /// FLAG_SOURCE and FLAG_THREAD sections, proving the drain still tolerates
+    /// sibling layouts that carry location/thread bytes in the record itself
+    /// (their flag bits are unambiguous against the site layout). The source
+    /// section must override the site's file/line, matching old semantics.
+    fn build_record_with_legacy_extra(
+        level: Level,
+        timestamp: u64,
+        site: &'static Site,
         source: Option<(&'static str, u32)>,
         thread_id: u64,
         thread_name: Option<&str>,
         args: &[(u8, Vec<u8>)],
     ) -> Vec<u8> {
-        let mut flags: u16 = FLAG_FORMAT | FLAG_THREAD;
+        let mut flags: u16 = FLAG_SITE | FLAG_THREAD;
         if source.is_some() {
             flags |= FLAG_SOURCE;
         }
 
         let mut payload: Vec<u8> = Vec::new();
 
-        // Format section.
-        payload.extend_from_slice(&(fmt.as_ptr() as u64).to_le_bytes());
-        payload.extend_from_slice(&(fmt.len() as u16).to_le_bytes());
+        // Site section (fast path).
+        payload.extend_from_slice(&(site as *const Site as u64).to_le_bytes());
 
-        // Source section.
+        // Legacy source section.
         if let Some((file, line)) = source {
             payload.extend_from_slice(&(file.as_ptr() as u64).to_le_bytes());
             payload.extend_from_slice(&(file.len() as u16).to_le_bytes());
             payload.extend_from_slice(&line.to_le_bytes());
         }
 
-        // Thread section.
+        // Legacy thread section.
         payload.extend_from_slice(&thread_id.to_le_bytes());
         let name_bytes = thread_name.map_or(&b""[..], |n| n.as_bytes());
         payload.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes());
@@ -1234,6 +1321,8 @@ mod tests {
             0,
             &identity_calibration(),
             &default_line_pattern(),
+            7, // ring thread id
+            "worker",
             &mut buf,
         );
         String::from_utf8(buf).unwrap()
@@ -1424,10 +1513,7 @@ mod tests {
         let record = build_record(
             Level::Info,
             0,
-            "x={}",
-            Some(("a.rs", 7)),
-            1,
-            None,
+            site_of("x={}", "a.rs", 7),
             &[le_bytes(TAG_U64, 42)],
         );
         let line = format_line(&record);
@@ -1439,10 +1525,7 @@ mod tests {
         let record = build_record(
             Level::Error,
             0,
-            "{} {} {}",
-            Some(("", 0)),
-            1,
-            None,
+            site_of("{} {} {}", "", 0),
             &[le_bytes(TAG_U16, 5), str_arg("ok"), le_bytes(TAG_BOOL, 1)],
         );
         let line = format_line(&record);
@@ -1454,10 +1537,7 @@ mod tests {
         let record = build_record(
             Level::Info,
             0,
-            "{{{}}}",
-            Some(("", 0)),
-            1,
-            None,
+            site_of("{{{}}}", "", 0),
             &[le_bytes(TAG_U64, 9)],
         );
         let line = format_line(&record);
@@ -1467,15 +1547,7 @@ mod tests {
     #[test]
     fn decode_unknown_tag_emits_placeholder() {
         // Tag 0x7F is not a known type; the drain must not panic.
-        let record = build_record(
-            Level::Info,
-            0,
-            "v={}",
-            Some(("", 0)),
-            1,
-            None,
-            &[(0x7F, vec![0u8])],
-        );
+        let record = build_record(Level::Info, 0, site_of("v={}", "", 0), &[(0x7F, vec![0u8])]);
         let line = format_line(&record);
         assert_eq!(
             line,
@@ -1489,10 +1561,7 @@ mod tests {
         let record = build_record(
             Level::Info,
             0,
-            "{} {}",
-            Some(("", 0)),
-            1,
-            None,
+            site_of("{} {}", "", 0),
             &[le_bytes(TAG_U64, 1)],
         );
         let line = format_line(&record);
@@ -1507,10 +1576,9 @@ mod tests {
         // Corruption: the count byte claims more args than the record actually
         // holds. The decoder must clamp to the tags present rather than panic on
         // a length-mismatched copy, and report the shortfall as a missing arg.
-        let mut record = build_record(Level::Info, 0, "v={}", Some(("", 0)), 1, None, &[]);
-        // The count byte follows the fixed header, the format section, and the
-        // thread section.
-        record[HEADER_SIZE + FORMAT_SECTION_SIZE + THREAD_SECTION_BASE_SIZE] = 200;
+        let mut record = build_record(Level::Info, 0, site_of("v={}", "", 0), &[]);
+        // The count byte follows the fixed header and the site section.
+        record[HEADER_SIZE + SITE_SECTION_SIZE] = 200;
         let line = format_line(&record);
         assert!(
             line.ends_with("v=<missing arg>"),
@@ -1521,9 +1589,59 @@ mod tests {
     #[test]
     fn decode_timestamp_conversion() {
         // With identity calibration, the raw tick is nanoseconds since epoch.
-        let record = build_record(Level::Info, 1_234_567_890, "t", Some(("", 0)), 1, None, &[]);
+        let record = build_record(Level::Info, 1_234_567_890, site_of("t", "", 0), &[]);
         let line = format_line(&record);
         assert_eq!(line, "1970-01-01T00:00:01.234567890Z INFO :0 t",);
+    }
+
+    #[test]
+    fn decodes_records_with_legacy_extra_sections() {
+        // A site-layout record that also carries legacy source/thread bytes.
+        // The source section overrides the site's file/line; the thread bytes
+        // override the ring identity. Both must render even though the modern
+        // producer never emits them.
+        let record = build_record_with_legacy_extra(
+            Level::Info,
+            0,
+            site_of("n={}", "site.rs", 9),
+            Some(("old.rs", 3)),
+            99,
+            Some("legacy"),
+            &[le_bytes(TAG_U64, 7)],
+        );
+        let mut buf = Vec::new();
+        decode_and_format(
+            &record,
+            0,
+            &identity_calibration(),
+            &default_line_pattern(),
+            1, // ring identity: different from the record's, must be overridden
+            "ring",
+            &mut buf,
+        );
+        let line = String::from_utf8(buf).unwrap();
+        assert!(
+            line.ends_with("INFO old.rs:3 n=7"),
+            "source override / message mismatch: {line:?}"
+        );
+        // A pattern that renders the thread proves the in-band override is used.
+        let mut buf = Vec::new();
+        let template = Template::parse("{timestamp} {level} {thread_id} {thread_name}: {message}")
+            .expect("valid template");
+        decode_and_format(
+            &record,
+            0,
+            &identity_calibration(),
+            &template,
+            1,
+            "ring",
+            &mut buf,
+        );
+        let line = String::from_utf8(buf).unwrap();
+        assert!(
+            line.contains("ThreadId(99)") && line.contains("legacy"),
+            "in-band thread override not applied: {line:?}"
+        );
     }
 
     // ---- poll loop tests ----------------------------------------------------
@@ -1546,10 +1664,7 @@ mod tests {
         let record = build_record(
             Level::Info,
             0,
-            "x={}",
-            Some(("a.rs", 7)),
-            1,
-            None,
+            site_of("x={}", "a.rs", 7),
             &[le_bytes(TAG_U64, 42)],
         );
         place_record(&ring, 0, &record);
@@ -1581,16 +1696,16 @@ mod tests {
 
         // A valid record, then one whose type byte is neither LOG_RECORD nor
         // END_OF_BUFFER (framing corruption), then a second valid record.
-        let r1 = build_record(Level::Info, 0, "first", None, 1, None, &[]);
+        let r1 = build_record(Level::Info, 0, site_of("first", "", 0), &[]);
         place_record(&ring, 0, &r1);
         let off2 = align_up(r1.len() as u64, SLOT_SIZE as u64);
 
-        let mut bad = build_record(Level::Info, 0, "corrupt", None, 1, None, &[]);
+        let mut bad = build_record(Level::Info, 0, site_of("corrupt", "", 0), &[]);
         bad[1] = 0x7F; // record type: not LOG_RECORD (1) or END_OF_BUFFER (2)
         place_record(&ring, off2, &bad);
         let off3 = off2 + align_up(bad.len() as u64, SLOT_SIZE as u64);
 
-        let r2 = build_record(Level::Info, 0, "second", None, 1, None, &[]);
+        let r2 = build_record(Level::Info, 0, site_of("second", "", 0), &[]);
         place_record(&ring, off3, &r2);
 
         drain.rings.push((Arc::clone(&ring), ring.serial()));
@@ -1614,13 +1729,13 @@ mod tests {
 
         // An EOB record spanning one slot, followed by a real record.
         let mut eob = Vec::new();
-        eob.push(0x01); // version
+        eob.push(VERSION); // version
         eob.push(END_OF_BUFFER); // type
         eob.extend_from_slice(&(SLOT_SIZE as u16).to_le_bytes()); // total_size
         eob.resize(SLOT_SIZE, 0); // pad to a full slot
         place_record(&ring, 0, &eob);
 
-        let record = build_record(Level::Info, 0, "hi", Some(("", 0)), 1, None, &[]);
+        let record = build_record(Level::Info, 0, site_of("hi", "", 0), &[]);
         place_record(&ring, SLOT_SIZE as u64, &record);
 
         drain.rings.push((Arc::clone(&ring), ring.serial()));
@@ -1639,8 +1754,8 @@ mod tests {
         let (mut drain, calls) = capture_drain();
         let ring = Arc::new(RingBuffer::new());
 
-        let r1 = build_record(Level::Info, 0, "a", None, 1, None, &[]);
-        let r2 = build_record(Level::Warn, 0, "b", None, 1, None, &[]);
+        let r1 = build_record(Level::Info, 0, site_of("a", "", 0), &[]);
+        let r2 = build_record(Level::Warn, 0, site_of("b", "", 0), &[]);
         let slot = SLOT_SIZE as u64;
         // Place two records in consecutive slots and set head past both.
         {
@@ -1733,7 +1848,7 @@ mod tests {
         // producer dead (live = false) with the record still unconsumed. The
         // ring is kept out of the shared REGISTRY so the assertion on `calls`
         // cannot be perturbed by a ring another parallel test registered.
-        let record = build_record(Level::Info, 0, "bye", Some(("", 0)), 1, None, &[]);
+        let record = build_record(Level::Info, 0, site_of("bye", "", 0), &[]);
         place_record(&ring, 0, &record);
         ring.live.store(false, Ordering::Release);
         drain.rings.push((Arc::clone(&ring), ring.serial()));
@@ -1774,10 +1889,7 @@ mod tests {
         let record = build_record(
             Level::Info,
             0x1234,
-            "hello {}",
-            Some(("f.rs", 1)),
-            1,
-            None,
+            site_of("hello {}", "f.rs", 1),
             &[le_bytes(TAG_U64, 42)],
         );
 
@@ -1853,10 +1965,7 @@ mod tests {
         let record = build_record(
             Level::Info,
             0,
-            "x={}",
-            Some(("a.rs", 7)),
-            1,
-            None,
+            site_of("x={}", "a.rs", 7),
             &[le_bytes(TAG_U64, 42)],
         );
         drain.rings.push((Arc::clone(&ring), ring.serial()));
@@ -1889,8 +1998,8 @@ mod tests {
         let ring = Arc::new(RingBuffer::new());
         drain.rings.push((Arc::clone(&ring), ring.serial()));
 
-        let r1 = build_record(Level::Info, 0, "one", Some(("", 0)), 1, None, &[]);
-        let r2 = build_record(Level::Warn, 0, "two", Some(("", 0)), 1, None, &[]);
+        let r1 = build_record(Level::Info, 0, site_of("one", "", 0), &[]);
+        let r2 = build_record(Level::Warn, 0, site_of("two", "", 0), &[]);
         push_record(&ring, &r1);
         push_record(&ring, &r2);
 
@@ -1920,8 +2029,8 @@ mod tests {
         let ring = Arc::new(RingBuffer::new());
         drain.rings.push((Arc::clone(&ring), ring.serial()));
 
-        let r1 = build_record(Level::Info, 0, "one", Some(("", 0)), 1, None, &[]);
-        let r2 = build_record(Level::Warn, 0, "two", Some(("", 0)), 1, None, &[]);
+        let r1 = build_record(Level::Info, 0, site_of("one", "", 0), &[]);
+        let r2 = build_record(Level::Warn, 0, site_of("two", "", 0), &[]);
 
         // Two commits without a consumed slot in between: r2 overwrites r1.
         ring.commit(&r1);

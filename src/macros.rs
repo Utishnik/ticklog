@@ -10,6 +10,7 @@
 use crate::builder::Backpressure;
 use crate::level::Level;
 use crate::record;
+use crate::record::Site;
 use crate::thread_buf::with_thread_buf;
 use crate::timestamp;
 
@@ -18,7 +19,7 @@ use crate::timestamp;
 /// record size below. This assertion keeps that literal honest: if the record
 /// layout constants change, the build fails here instead of silently mis-sizing
 /// every record.
-const _: () = assert!(record::BASE_RECORD_SIZE == 41);
+const _: () = assert!(record::BASE_RECORD_SIZE == 25);
 
 /// Monomorphized dispatch: timestamps, assembles the record via
 /// [`assemble`](crate::record::assemble), and writes it to the thread's ring
@@ -36,16 +37,14 @@ const _: () = assert!(record::BASE_RECORD_SIZE == 41);
 #[inline(always)]
 pub fn dispatch(
     level: Level,
-    fmt: &'static str,
-    file: &'static str,
-    line: u32,
+    site: &'static Site,
     n_args: u8,
     args_total: usize,
     policy: Backpressure,
     write_args: impl FnOnce(&mut [u8]),
 ) {
     with_thread_buf(|tb| {
-        let total_size = args_total + tb.thread_section_size as usize;
+        let total_size = args_total;
         // Drop, don't truncate, a record too large for the u16 `total_size` field.
         //
         // ticklog targets ultra-low-latency hot paths (e.g. trade execution) where
@@ -60,24 +59,13 @@ pub fn dispatch(
         }
 
         let timestamp = timestamp::raw_timestamp();
-        let flags = record::FLAG_FORMAT | record::FLAG_SOURCE | record::FLAG_THREAD;
+        let flags = record::FLAG_SITE;
 
         #[cfg(not(feature = "fifo-backend"))]
         {
             if let Some(slot) = crate::thread_buf::reserve_with_policy(tb, total_size, policy) {
                 record::assemble(
-                    slot.ptr,
-                    level,
-                    timestamp,
-                    flags,
-                    fmt,
-                    file,
-                    line,
-                    tb.thread_id,
-                    &tb.thread_name,
-                    n_args,
-                    total_size,
-                    write_args,
+                    slot.ptr, level, timestamp, flags, site, n_args, total_size, write_args,
                 );
                 tb.ring.publish(slot);
             }
@@ -97,11 +85,7 @@ pub fn dispatch(
                     level,
                     timestamp,
                     flags,
-                    fmt,
-                    file,
-                    line,
-                    tb.thread_id,
-                    &tb.thread_name,
+                    site,
                     n_args,
                     total_size,
                     write_args,
@@ -129,9 +113,18 @@ macro_rules! __ticklog_log {
     ($level:expr, $fmt:literal $(,)?) => {{
         const _: () = $crate::__private::check_fmt($fmt, 0);
         if $level <= __ticklog_max_level!() {
-            const __TOTAL: usize = $crate::__private::BASE_RECORD_SIZE;
             $crate::__private::dispatch(
-                $level, $fmt, file!(), line!(), 0u8, __TOTAL,
+                $level,
+                // A promoted `&'static Site` descriptor: one pointer to a
+                // read-only struct carrying fmt/file/line, addressed once per
+                // call site instead of copying the sections into every record.
+                &$crate::Site {
+                    fmt: $fmt,
+                    file: file!(),
+                    line: line!(),
+                },
+                0u8,
+                $crate::__private::BASE_RECORD_SIZE,
                 __ticklog_backpressure!(),
                 |_buf| {},
             );
@@ -148,16 +141,21 @@ macro_rules! __ticklog_log {
             // check_fmt validates.
             const __N_ARGS: u8 =
                 <[&str]>::len(&[$(stringify!($arg)),*]) as u8;
-            const __BASE: usize = $crate::__private::BASE_RECORD_SIZE;
             // Evaluate each argument expression exactly once, into a cons-list of
             // references. Every later use reads these bindings, so a
             // side-effecting argument runs once rather than once per use.
             let __args = $crate::__ticklog_cons!($($arg),+);
-            let __total_size: usize = __BASE
+            let __total_size: usize = $crate::__private::BASE_RECORD_SIZE
                 .wrapping_add(__N_ARGS as usize)
                 .wrapping_add($crate::__private::LoggableArgs::args_encoded_size(&__args));
             $crate::__private::dispatch(
-                $level, $fmt, file!(), line!(), __N_ARGS, __total_size,
+                $level,
+                &$crate::Site {
+                    fmt: $fmt,
+                    file: file!(),
+                    line: line!(),
+                },
+                __N_ARGS, __total_size,
                 __ticklog_backpressure!(),
                 |__buf: &mut [u8]| {
                     // Tags fill buf[0..n_args]; payloads follow.

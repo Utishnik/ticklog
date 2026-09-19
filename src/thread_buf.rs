@@ -12,7 +12,6 @@ use std::thread;
 
 use crate::builder::Backpressure;
 use crate::error::TicklogError;
-use crate::record::THREAD_SECTION_BASE_SIZE;
 #[cfg(not(feature = "fifo-backend"))]
 use crate::ring::Reservation;
 use crate::ring::{DEFAULT_RING_SIZE, RingBuffer};
@@ -35,8 +34,6 @@ pub(crate) struct ThreadBuf {
     pub(crate) thread_id: u64,
     /// Cached thread name. Falls back to `<unnamed>` when the OS thread has no name.
     pub(crate) thread_name: String,
-    /// Encoded wire size of the thread section for this thread.
-    pub(crate) thread_section_size: u16,
     /// Reusable staging buffer for backend-record byte pushes. Only the
     /// experimental FIFO backends write records this way.
     #[cfg(feature = "fifo-backend")]
@@ -63,10 +60,8 @@ impl Drop for ThreadBuf {
 }
 
 /// Maximum length of a cached thread name, in bytes. Names longer than this
-/// are truncated to avoid bloating every record from the thread.
+/// are truncated so the ring's registered name stays small.
 const MAX_THREAD_NAME_LEN: usize = 256;
-
-const _: () = assert!(THREAD_SECTION_BASE_SIZE + MAX_THREAD_NAME_LEN <= u16::MAX as usize);
 
 /// Per-thread ring buffer capacity, set once at [`crate::configure!`] time.
 /// Falls back to [`DEFAULT_RING_SIZE`] when the ring registry is initialized
@@ -187,12 +182,12 @@ where
             };
             #[cfg(feature = "fifo-backend")]
             let ring = Arc::new(RingBuffer::with_capacity(capacity));
-            register_ring(Arc::clone(&ring));
+            let thread_id = get_stable_thread_id();
             let thread_name: String = thread::current()
                 .name()
                 .map(String::from)
                 .unwrap_or_else(|| "<unnamed>".to_string());
-            // Truncate names longer than the wire-format limit on a valid
+            // Truncate names longer than the display limit on a valid
             // UTF-8 boundary so the slice never splits a multi-byte
             // character (which would panic).
             let thread_name = if thread_name.len() > MAX_THREAD_NAME_LEN {
@@ -204,13 +199,16 @@ where
             } else {
                 thread_name
             };
-            let thread_section_size: u16 = (THREAD_SECTION_BASE_SIZE + thread_name.len()) as u16;
+            // The drain keys thread identity off the ring (a ring belongs to
+            // exactly one producer), so the name is registered here once and
+            // never repeated in the records.
+            ring.set_thread_info(thread_id, &thread_name);
+            register_ring(Arc::clone(&ring));
             *opt = Some(ThreadBuf {
                 ring,
                 helper: None,
-                thread_id: get_stable_thread_id(),
+                thread_id,
                 thread_name,
-                thread_section_size,
                 #[cfg(feature = "fifo-backend")]
                 staging: Vec::with_capacity(1024),
             });
@@ -293,6 +291,8 @@ pub(crate) fn reserve_with_policy(
                 }
                 // The current segment is full: hand it to the drain and take
                 // a fresh one.
+                #[cfg(feature = "watermark-head")]
+                tb.ring.flush_watermark();
                 tb.ring.mark_handed_off();
                 let new_ring = if policy == Backpressure::NanoLog {
                     let spare = segments.try_take_spare();
@@ -311,6 +311,10 @@ pub(crate) fn reserve_with_policy(
                 } else {
                     segments.alloc_fresh()
                 };
+                // The drain keys thread identity off the ring; record it for
+                // this (possibly recycled) segment's new incarnation before it
+                // becomes visible through the registry.
+                new_ring.set_thread_info(tb.thread_id, &tb.thread_name);
                 register_ring(Arc::clone(&new_ring));
                 tb.ring = new_ring;
                 // Try the fresh (empty) segment; the loop also re-enters after
@@ -360,16 +364,11 @@ mod tests {
             helper: None,
             thread_id: 42,
             thread_name: "test-thread".into(),
-            thread_section_size: (THREAD_SECTION_BASE_SIZE + "test-thread".len()) as u16,
             #[cfg(feature = "fifo-backend")]
             staging: Vec::new(),
         };
         assert_eq!(tb.thread_id, 42);
         assert_eq!(&tb.thread_name, "test-thread");
-        assert_eq!(
-            tb.thread_section_size as usize,
-            THREAD_SECTION_BASE_SIZE + "test-thread".len(),
-        );
         assert!(tb.ring.live.load(Ordering::Relaxed));
     }
 
@@ -381,7 +380,6 @@ mod tests {
             helper: None,
             thread_id: 1,
             thread_name: "t".into(),
-            thread_section_size: THREAD_SECTION_BASE_SIZE as u16,
             #[cfg(feature = "fifo-backend")]
             staging: Vec::new(),
         };
@@ -399,7 +397,6 @@ mod tests {
             helper: None,
             thread_id: 1,
             thread_name: "t".into(),
-            thread_section_size: THREAD_SECTION_BASE_SIZE as u16,
             #[cfg(feature = "fifo-backend")]
             staging: Vec::new(),
         };
@@ -464,17 +461,17 @@ mod tests {
     }
 
     #[test]
-    fn thread_section_size_fits_in_u16_at_max_name_length() {
-        // If MAX_THREAD_NAME_LEN were raised above 65525, the `as u16` cast
-        // at init would silently truncate, producing an incorrect wire size.
-        let max_possible = THREAD_SECTION_BASE_SIZE + MAX_THREAD_NAME_LEN;
-        assert!(
-            max_possible <= u16::MAX as usize,
-            "THREAD_SECTION_BASE_SIZE ({}) + MAX_THREAD_NAME_LEN ({}) = {} exceeds u16::MAX",
-            THREAD_SECTION_BASE_SIZE,
-            MAX_THREAD_NAME_LEN,
-            max_possible,
-        );
+    fn set_thread_info_is_visible_to_the_drain() {
+        // The record layout carries no thread bytes; the ring supplies them.
+        // Guard that registration publishes the id/name for the drain to read.
+        let ring = Arc::new(RingBuffer::new());
+        ring.set_thread_info(37, "producer-37");
+        assert_eq!(ring.thread_id(), 37);
+        assert_eq!(ring.thread_name(), "producer-37");
+        // Re-registration (handoff) overwrites the previous identity.
+        ring.set_thread_info(38, "producer-38");
+        assert_eq!(ring.thread_id(), 38);
+        assert_eq!(ring.thread_name(), "producer-38");
     }
 
     /// A thread name whose byte-length exceeds [`MAX_THREAD_NAME_LEN`] and

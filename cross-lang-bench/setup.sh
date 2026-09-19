@@ -68,13 +68,28 @@ cp target/release/ticklog-cross-lang-harness "$SCRIPT_DIR/bin/ticklog_triple_buf
 cd "$SCRIPT_DIR"
 echo "  done -> bin/ticklog_triple_buffer_harness"
 
+# All non-Block backpressure policies (each is a separate ticklog feature).
+# The default policy (no feature) is Block; every other policy builds its own
+# harness binary so run.sh can exercise them side-by-side next to the C++
+# (quill/NanoLog) and Go (zerolog/zap) candidates.
+echo "=== Building rust/ticklog (all non-Block policies) ==="
+cd rust/ticklog
+for pol in fastwm watermark fast quill nanolog; do
+    echo "  + policy-$pol -> bin/ticklog_policy_${pol}_harness"
+    cargo build --release --features "policy-$pol" 2>&1
+    cp target/release/ticklog-cross-lang-harness \
+        "$SCRIPT_DIR/bin/ticklog_policy_${pol}_harness"
+done
+cd "$SCRIPT_DIR"
+echo "  done -> bin/ticklog_policy_*_harness (fastwm watermark fast quill nanolog)"
+
 # -- Go: zerolog + zap --------------------------------------------------
 
 echo "=== Building Go harnesses ==="
 cd go
-go build -o ../bin/zerolog_harness ./zerolog/
+go build -buildvcs=false -o ../bin/zerolog_harness ./zerolog/
 echo "  done -> bin/zerolog_harness"
-go build -o ../bin/zap_harness ./zap/
+go build -buildvcs=false -o ../bin/zap_harness ./zap/
 echo "  done -> bin/zap_harness"
 cd "$SCRIPT_DIR"
 
@@ -93,9 +108,9 @@ if [[ "$OS" == "Linux" ]]; then
     echo "=== Building cpp/nanolog ==="
 
     # Fetch NanoLog runtime if not already present.
-    if [ ! -d cpp/NanoLog ]; then
+    if [ ! -d "$HOME/NanoLog" ]; then
         echo "  fetching NanoLog..."
-        git clone --depth 1 https://github.com/PlatformLab/NanoLog.git cpp/NanoLog 2>&1
+        git clone --depth 1 https://github.com/PlatformLab/NanoLog.git "$HOME/NanoLog" 2>&1
     fi
 
     # NanoLog's runtime Makefile invokes `python` (its code-generating
@@ -114,11 +129,11 @@ if [[ "$OS" == "Linux" ]]; then
     fi
 
     echo "  building runtime (make -j$NPROC)..."
-    make -C cpp/NanoLog/runtime -j"$NPROC" 2>&1
+    make -C "$HOME/NanoLog/runtime" -j"$NPROC" 2>&1
 
     cd cpp/nanolog
     cmake -B build -DCMAKE_BUILD_TYPE=Release \
-        -DNANOLOG_RUNTIME_DIR="$SCRIPT_DIR/cpp/NanoLog/runtime" 2>&1
+        -DNANOLOG_RUNTIME_DIR="$HOME/NanoLog/runtime" 2>&1
     cmake --build build 2>&1
     cd "$SCRIPT_DIR"
     echo "  done -> cpp/nanolog/build/nanolog_harness"

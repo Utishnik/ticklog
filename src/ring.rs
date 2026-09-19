@@ -79,11 +79,19 @@ mod custom {
 
     use std::cell::UnsafeCell;
     use std::sync::Arc;
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
     use super::{Reservation, SLOT_SIZE, align_up};
     use crate::builder::Backpressure;
     use crate::record::{END_OF_BUFFER, MAX_RECORD_SIZE, VERSION};
+
+    /// How many `reserve`+`publish` calls elapse before the producer stores a
+    /// new `head` watermark under the `watermark-head` feature. 1000 matches
+    /// the cross-language harness's batch size, so the drain lags by at most
+    /// one measurement batch.
+    #[cfg(feature = "watermark-head")]
+    pub(crate) const WATERMARK_HEAD_RECORDS: u64 = 1000;
 
     /// Where the ring's bytes live. The classic path uses a crate-allocated
     /// boxed slice; the segmented paths allocate from the shared `r3` arena so
@@ -115,6 +123,15 @@ mod custom {
         /// Producer's local copy of the drain's tail. Cached to avoid reading
         /// the drain's cache line on every record.
         tail_cache: UnsafeCell<u64>,
+        /// Producer-private true write position. Only touched by the producing
+        /// thread, like `tail_cache`. Under the `watermark-head` feature the
+        /// shared `head` above is a lagging watermark and `reserve` bookkeeping
+        /// reads this slot instead.
+        #[cfg(feature = "watermark-head")]
+        local_head: UnsafeCell<u64>,
+        /// Records published since the last `head` watermark.
+        #[cfg(feature = "watermark-head")]
+        since_watermark: UnsafeCell<u64>,
     }
 
     /// Drain-cache-line half of the control state. Only the drain writes
@@ -144,6 +161,18 @@ mod custom {
         /// Acquire to detect dead rings whose remaining records have been
         /// consumed.
         pub(crate) live: AtomicBool,
+
+        // ===== Thread identity (registration metadata) =====
+        /// Stable thread id of this ring's producer, set at registration (and
+        /// each handoff, for recycled segments). Written by the producer,
+        /// read by the drain under the registry lock / after the producer
+        /// exits. Records themselves carry no thread bytes: the ring's
+        /// identity is the identity of every record it holds.
+        thread_id: AtomicU64,
+        /// Producer thread name, set alongside [`thread_id`](Self::thread_id).
+        /// The drain locks briefly once per pass (never per record) to
+        /// snapshot the name it formats with.
+        thread_name: Mutex<String>,
 
         /// Ring storage capacity in bytes. Power of two for bitmask indexing.
         capacity: usize,
@@ -272,12 +301,18 @@ mod custom {
                 producer: crossbeam_utils::CachePadded::new(ProducerLine {
                     head: AtomicU64::new(0),
                     tail_cache: UnsafeCell::new(0),
+                    #[cfg(feature = "watermark-head")]
+                    local_head: UnsafeCell::new(0),
+                    #[cfg(feature = "watermark-head")]
+                    since_watermark: UnsafeCell::new(0),
                 }),
                 drain: crossbeam_utils::CachePadded::new(DrainLine {
                     tail: AtomicU64::new(0),
                     head_cache: UnsafeCell::new(0),
                 }),
                 live: AtomicBool::new(true),
+                thread_id: AtomicU64::new(0),
+                thread_name: Mutex::new(String::new()),
                 capacity,
                 mask: (capacity - 1) as u64,
                 data,
@@ -301,6 +336,34 @@ mod custom {
         /// [`crate::thread_buf::register_ring`].
         pub(crate) fn set_serial(&self, serial: u64) {
             self.serial.store(serial, Ordering::Relaxed);
+        }
+
+        /// Records this ring's producer identity (stable thread id + name).
+        /// The record layout stores no per-record thread bytes: the ring's
+        /// identity is the identity of every record it holds. Called by
+        /// [`crate::thread_buf`] at registration and at every handoff (so a
+        /// recycled segment carries its new producer's identity).
+        ///
+        /// The caller must set the info *before* the ring becomes visible
+        /// through the registry (registration), and the drain reads the info
+        /// while holding the registry lock, so the values are stable for any
+        /// sync that can observe the ring.
+        pub(crate) fn set_thread_info(&self, thread_id: u64, thread_name: &str) {
+            self.thread_id.store(thread_id, Ordering::Relaxed);
+            let mut guard = self.thread_name.lock().expect("thread_name mutex poisoned");
+            *guard = thread_name.to_string();
+        }
+
+        /// Identity used by the drain when formatting this ring's records.
+        #[inline(always)]
+        pub(crate) fn thread_id(&self) -> u64 {
+            self.thread_id.load(Ordering::Relaxed)
+        }
+
+        /// Identity used by the drain when formatting this ring's records.
+        pub(crate) fn thread_name(&self) -> String {
+            let guard = self.thread_name.lock().expect("thread_name mutex poisoned");
+            guard.clone()
         }
 
         /// Whether a blocked producer has reserved this segment for
@@ -369,6 +432,11 @@ mod custom {
             unsafe {
                 *self.producer.tail_cache.get() = 0;
                 *self.drain.head_cache.get() = 0;
+                #[cfg(feature = "watermark-head")]
+                {
+                    *self.producer.local_head.get() = 0;
+                    *self.producer.since_watermark.get() = 0;
+                }
             }
             self.helper_reserved.store(false, Ordering::Release);
             self.draining.store(false, Ordering::Release);
@@ -409,6 +477,40 @@ mod custom {
         #[inline(always)]
         pub(crate) fn tail_cache(&self) -> *mut u64 {
             self.producer.tail_cache.get()
+        }
+
+        /// The producer's current write position.
+        ///
+        /// Under `watermark-head` this is the producer-private `local_head`;
+        /// otherwise `head` is written on every publish and doubles as the
+        /// position (Relaxed load of the producer's own store is sufficient).
+        #[inline(always)]
+        fn producer_head(&self) -> u64 {
+            #[cfg(feature = "watermark-head")]
+            {
+                // SAFETY: local_head is producer-private; only the producing
+                // thread touches it, same ownership as `tail_cache`.
+                unsafe { *self.producer.local_head.get() }
+            }
+            #[cfg(not(feature = "watermark-head"))]
+            {
+                self.head().load(Ordering::Relaxed)
+            }
+        }
+
+        /// Publishes the producer's current write position to the drain as a
+        /// watermark. Release pairs with the drain's Acquire load of `head`,
+        /// so every byte written at or before the watermark is visible before
+        /// the drain reads the region.
+        #[cfg(feature = "watermark-head")]
+        #[inline(always)]
+        pub(crate) fn flush_watermark(&self) {
+            // SAFETY: both slots are producer-private.
+            unsafe {
+                *self.producer.since_watermark.get() = 0;
+                let h = *self.producer.local_head.get();
+                self.head().store(h, Ordering::Release);
+            }
         }
 
         /// Raw pointer to the drain's private `head_cache` slot.
@@ -466,9 +568,12 @@ mod custom {
             let total = total_size as u64;
             let aligned = align_up(total, SLOT_SIZE as u64);
 
-            // The producer is the sole writer of `head`, so a Relaxed load of
-            // its own position is sufficient.
-            let head = self.head().load(Ordering::Relaxed);
+            // The producer is the sole writer of its position. Under the
+            // `watermark-head` feature the shared `head` atomic is a lagging
+            // watermark, so bookkeeping reads the producer-private copy;
+            // otherwise `head` doubles as the position (Relaxed load of the
+            // producer's own store is sufficient).
+            let head = self.producer_head();
             let offset = (head & self.mask()) as usize;
             let remaining_phys = (self.capacity() - offset) as u64;
 
@@ -523,9 +628,27 @@ mod custom {
         /// Publishes a reserved slot to the drain. Release pairs with the
         /// drain's Acquire load of `head`, so every byte written to `r.ptr` is
         /// visible before the drain sees the new head and reads the region.
+        ///
+        /// Under the `watermark-head` feature the drain-facing store happens
+        /// once per [`WATERMARK_HEAD_RECORDS`] publishes; every call still
+        /// records the true position producer-privately.
         #[inline(always)]
         pub(crate) fn publish(&self, r: Reservation) {
-            self.head().store(r.head, Ordering::Release);
+            #[cfg(feature = "watermark-head")]
+            {
+                // SAFETY: both slots are producer-private.
+                unsafe {
+                    *self.producer.local_head.get() = r.head;
+                    *self.producer.since_watermark.get() += 1;
+                }
+                if unsafe { *self.producer.since_watermark.get() } >= WATERMARK_HEAD_RECORDS {
+                    self.flush_watermark();
+                }
+            }
+            #[cfg(not(feature = "watermark-head"))]
+            {
+                self.head().store(r.head, Ordering::Release);
+            }
         }
 
         /// Ensures `[head, head + needed)` is free for the producer to write,
@@ -541,9 +664,23 @@ mod custom {
             // it.
             let cached = unsafe { *self.tail_cache() };
             if head.wrapping_add(needed).wrapping_sub(cached) <= self.mask() {
-                let tail = self.tail().load(Ordering::Acquire);
-                unsafe { *self.tail_cache() = tail };
-                return true;
+                #[cfg(feature = "fast-tail-cache")]
+                {
+                    // Quill-style fast path: the cached tail may be stale (the
+                    // drain keeps consuming), so skip the cross-core load of the
+                    // real tail entirely. Occupancy computed from a stale tail
+                    // only ever over-estimates real occupancy (real tail >=
+                    // cached), so a false "fits" here never overwrites a slot
+                    // the drain has not consumed. The load below only runs on
+                    // the cold confirm path.
+                    return true;
+                }
+                #[cfg(not(feature = "fast-tail-cache"))]
+                {
+                    let tail = self.tail().load(Ordering::Acquire);
+                    unsafe { *self.tail_cache() = tail };
+                    return true;
+                }
             }
 
             let mut backoff = crate::backoff::Backoff::new();
@@ -921,11 +1058,14 @@ pub(crate) use crate::ringbuffer_backend::RingBuffer;
     not(feature = "backend-ringbuf")
 ))]
 pub(crate) use crate::triple_buffer_backend::RingBuffer;
-#[cfg(not(any(
-    feature = "backend-ringbuffer",
-    feature = "backend-ringbuf",
-    feature = "backend-triple-buffer"
-)))]
+#[cfg(all(
+    not(feature = "fifo-backend"),
+    not(any(
+        feature = "backend-ringbuffer",
+        feature = "backend-ringbuf",
+        feature = "backend-triple-buffer"
+    ))
+))]
 pub(crate) use custom::RingBuffer;
 
 #[cfg(test)]

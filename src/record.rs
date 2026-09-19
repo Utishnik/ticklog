@@ -6,21 +6,27 @@
 //!
 //! ```text
 //! header:  version u8 | type u8 | total_size u16 | level u8 | flags u16 | pad u8 | timestamp u64
-//! format:  fmt_ptr u64 | fmt_len u16                          (FLAG_FORMAT)
-//! source:  file_ptr u64 | file_len u16 | line u32             (FLAG_SOURCE)
-//! thread:  thread_id u64 | name_len u16 | name bytes          (FLAG_THREAD)
+//! site:    site_ptr u64                                          (FLAG_SITE)
+//! source:  file_ptr u64 | file_len u16 | line u32                (FLAG_SOURCE, legacy wire)
+//! thread:  thread_id u64 | name_len u16 | name bytes             (FLAG_THREAD, legacy wire)
 //! args:    count u8 | tag u8 * count | payload bytes * count
 //! ```
 //!
-//! The format and source strings are `&'static str` referenced by pointer, not
-//! copied, so they cost nothing on the hot path and are read directly from the
-//! binary's read-only data by the drain.
+//! The per-record cost is deliberately minimal: the record carries only a
+//! pointer to a [`Site`] (a `&'static` call-site descriptor holding the format
+//! string, source file, and line). The format/source strings live in the
+//! binary's read-only data and are referenced by pointer, never copied, so the
+//! producer writes one 8-byte pointer instead of the fmt/source sections early
+//! designs embedded per record. Thread identity is not in the record at all:
+//! a ring belongs to exactly one producer, so the drain keys thread id/name
+//! off the ring's registration. The `FLAG_SOURCE`/`FLAG_THREAD` sections
+//! remain decodable for older wire records but are not produced.
 
 use crate::level::Level;
 use core::mem::size_of;
 
 /// Record format version written in byte 0 of every header.
-pub(crate) const VERSION: u8 = 0x01;
+pub(crate) const VERSION: u8 = 0x02;
 /// Record type: a normal encoded log record.
 pub(crate) const LOG_RECORD: u8 = 1;
 /// Record type: filler written before a ring wrap so no record straddles the
@@ -36,33 +42,31 @@ pub(crate) const HEADER_SIZE: usize = size_of::<u8>()  // version
     + size_of::<u16>()  // flags
     + size_of::<u8>()   // _pad
     + size_of::<u64>(); // timestamp
-/// Encoded size of the format section: an 8-byte pointer and a 2-byte length.
-pub(crate) const FORMAT_SECTION_SIZE: usize = size_of::<u64>()  // fmt_ptr
-    + size_of::<u16>(); // fmt_len
-/// Encoded size of the source section: an 8-byte pointer, a 2-byte length, and
-/// a 4-byte line number.
+/// Encoded size of the site section: an 8-byte pointer to a [`Site`].
+pub(crate) const SITE_SECTION_SIZE: usize = size_of::<u64>();
+/// Encoded size of a legacy source section: an 8-byte pointer, a 2-byte
+/// length, and a 4-byte line number. Decoded from older wire records only.
 pub(crate) const SOURCE_SECTION_SIZE: usize = size_of::<u64>()  // file_ptr
     + size_of::<u16>()  // file_len
     + size_of::<u32>(); // line
 /// Size of the argument count byte that precedes the tags and payloads.
 pub(crate) const COUNT_SIZE: usize = size_of::<u8>();
-/// Encoded size of the thread section without the name bytes:
+/// Encoded size of a legacy thread section base (without name bytes):
 /// an 8-byte thread id and a 2-byte name length prefix.
 pub(crate) const THREAD_SECTION_BASE_SIZE: usize = size_of::<u64>()  // thread_id
     + size_of::<u16>(); // name_len
 
 /// Total size of a record's fixed sections, before any arguments: header,
-/// format, source, thread, and the count byte. The logging macros hardcode this
-/// base (they expand in the caller's crate and cannot read this const); a
-/// compile-time assertion in `macros` guards the two against drift.
-pub const BASE_RECORD_SIZE: usize =
-    HEADER_SIZE + FORMAT_SECTION_SIZE + SOURCE_SECTION_SIZE + COUNT_SIZE;
+/// site, and the count byte. The logging macros hardcode this base (they
+/// expand in the caller's crate and cannot read this const); a compile-time
+/// assertion in `macros` guards the two against drift.
+pub const BASE_RECORD_SIZE: usize = HEADER_SIZE + SITE_SECTION_SIZE + COUNT_SIZE;
 
-/// Flag bit: the format-string section is present.
-pub(crate) const FLAG_FORMAT: u16 = 0x01;
-/// Flag bit: the source-location section is present.
+/// Flag bit: the site section is present.
+pub(crate) const FLAG_SITE: u16 = 0x01;
+/// Flag bit: a legacy in-band source section is present.
 pub(crate) const FLAG_SOURCE: u16 = 0x02;
-/// Flag bit: the thread section is present.
+/// Flag bit: a legacy in-band thread section is present.
 pub(crate) const FLAG_THREAD: u16 = 0x04;
 /// Flag bit: the process section is present.
 pub(crate) const FLAG_PROCESS: u16 = 0x08;
@@ -73,9 +77,33 @@ pub(crate) const FLAG_COMPLEX: u16 = 0x10;
 /// would encode larger than this is dropped rather than truncated.
 pub(crate) const MAX_RECORD_SIZE: usize = u16::MAX as usize;
 
-/// Assembles a record by writing the fixed sections (header, format, source)
-/// into `dst`, then delegating argument encoding to the caller's
-/// monomorphized closure.
+/// Descriptor for one logging call site: the format string plus the source
+/// file and line the macros captured.
+///
+/// The logging macros construct `&Site` via Rust's constant promotion at every
+/// macro instantiation, so each call site's descriptor address is effectively
+/// unique and `'static` (read-only data). The producer writes that address
+/// into every record; the drain dereferences it to recover the format string,
+/// file, and line without paying per-record section costs. Equality of two
+/// promoted descriptors is by value, so the compiler may fold identical
+/// descriptors — harmless, because the encoded content is identical.
+///
+/// Public only so the logging macros can construct it through `$crate`;
+/// referenced via `crate::__private`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct Site {
+    /// The format string literal, e.g. `"listening on {}"`.
+    pub fmt: &'static str,
+    /// The source file (`file!()`), e.g. `"src/main.rs"`.
+    pub file: &'static str,
+    /// The source line (`line!()`).
+    pub line: u32,
+}
+
+/// Assembles a record by writing the fixed sections (header, site) into
+/// `dst`, then delegating argument encoding to the caller's monomorphized
+/// closure.
 ///
 /// The closure receives a mutable slice starting right after the count byte,
 /// sized to fit exactly `args_bytes + n_args` bytes (tags + payloads). It is
@@ -88,8 +116,8 @@ pub(crate) const MAX_RECORD_SIZE: usize = u16::MAX as usize;
 /// `dst` must point to a writable region of at least `total_size` bytes. The
 /// caller must guarantee that `write_args` writes exactly `n_args` tag bytes
 /// followed by `args_bytes` payload bytes.
-// The record fields (header, source location, arg count/size, and the arg-
-// writing closure) are genuinely distinct inputs to this monomorphized hot-path
+// The record fields (header, site, arg count/size, and the arg-writing
+// closure) are genuinely distinct inputs to this monomorphized hot-path
 // assembler; bundling them into a struct would add indirection at the single
 // call site without making anything clearer.
 #[allow(clippy::too_many_arguments)]
@@ -99,11 +127,7 @@ pub(crate) fn assemble(
     level: Level,
     timestamp: u64,
     flags: u16,
-    fmt: &'static str,
-    file: &'static str,
-    line: u32,
-    thread_id: u64,
-    thread_name: &str,
+    site: &'static Site,
     n_args: u8,
     total_size: usize,
     write_args: impl FnOnce(&mut [u8]),
@@ -112,8 +136,6 @@ pub(crate) fn assemble(
     let level_u8 = level.to_u8();
 
     debug_assert!(total_size <= MAX_RECORD_SIZE);
-    debug_assert!(fmt.len() <= u16::MAX as usize);
-    debug_assert!(file.len() <= u16::MAX as usize);
 
     // SAFETY: The caller guarantees `dst` points to `total_size` writable
     // bytes. Every one of those bytes is written by the `put!`
@@ -143,25 +165,10 @@ pub(crate) fn assemble(
         put!([0u8]); // _pad
         put!(timestamp.to_le_bytes());
 
-        // Format section
-        if flags & FLAG_FORMAT != 0 {
-            put!((fmt.as_ptr() as u64).to_le_bytes());
-            put!((fmt.len() as u16).to_le_bytes());
-        }
-
-        // Source section
-        if flags & FLAG_SOURCE != 0 {
-            put!((file.as_ptr() as u64).to_le_bytes());
-            put!((file.len() as u16).to_le_bytes());
-            put!(line.to_le_bytes());
-        }
-
-        // Thread section
-        if flags & FLAG_THREAD != 0 {
-            put!(thread_id.to_le_bytes());
-            let name_bytes = thread_name.as_bytes();
-            put!((name_bytes.len() as u16).to_le_bytes());
-            put!(name_bytes);
+        // Site section: the accepted fast path. The drain dereferences the
+        // pointer to the promoted call-site descriptor for fmt/file/line.
+        if flags & FLAG_SITE != 0 {
+            put!((site as *const Site as u64).to_le_bytes());
         }
 
         // Count byte
@@ -178,41 +185,25 @@ mod tests {
     use crate::encode::Loggable;
 
     /// Test helper: wraps [`assemble`] with a `&[&dyn Loggable]` slice for
-    /// convenience.  Computes sizes from the slice and delegates to the
+    /// convenience. Computes sizes from the slice and delegates to the
     /// real (monomorphized) `assemble` via a closure.
-    #[allow(clippy::too_many_arguments)]
     fn check_assemble(
         scratch: &mut Vec<u8>,
         level: Level,
         timestamp: u64,
-        fmt: &'static str,
-        file: &'static str,
-        line: u32,
-        thread_id: u64,
-        thread_name: &str,
+        site: &'static Site,
         args: &[&dyn Loggable],
     ) -> bool {
         if args.len() > u8::MAX as usize {
             return false;
         }
-        if fmt.len() > u16::MAX as usize || file.len() > u16::MAX as usize {
-            return false;
-        }
 
-        let mut args_bytes = 0usize;
+        let mut args_payload = 0usize;
         for arg in args {
-            args_bytes += arg.encoded_size();
+            args_payload += arg.encoded_size();
         }
-        let thread_name_len = thread_name.len();
-        let flags = FLAG_FORMAT | FLAG_SOURCE | FLAG_THREAD;
-        let total_size = HEADER_SIZE
-            + FORMAT_SECTION_SIZE
-            + SOURCE_SECTION_SIZE
-            + THREAD_SECTION_BASE_SIZE
-            + thread_name_len
-            + COUNT_SIZE
-            + args.len()
-            + args_bytes;
+        let flags = FLAG_SITE;
+        let total_size = HEADER_SIZE + SITE_SECTION_SIZE + COUNT_SIZE + args.len() + args_payload;
         if total_size > MAX_RECORD_SIZE {
             return false;
         }
@@ -225,11 +216,7 @@ mod tests {
             level,
             timestamp,
             flags,
-            fmt,
-            file,
-            line,
-            thread_id,
-            thread_name,
+            site,
             n_args,
             total_size,
             |buf| {
@@ -257,49 +244,44 @@ mod tests {
         u16::from_le_bytes(bytes[offset..offset + 2].try_into().unwrap())
     }
 
-    // Reads a little-endian u32 at `offset`.
-    fn read_u32(bytes: &[u8], offset: usize) -> u32 {
-        u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
-    }
-
     // Reads a little-endian u64 at `offset`.
     fn read_u64(bytes: &[u8], offset: usize) -> u64 {
         u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
     }
 
+    const SITE: &Site = &Site {
+        fmt: "value {}",
+        file: "src/x.rs",
+        line: 42,
+    };
+
     #[test]
     fn header_fields_are_written() {
         let mut buf = Vec::new();
-        let ok = check_assemble(&mut buf, Level::Warn, 0xABCD, "hi", "f.rs", 7, 1, "", &[]);
+        let ok = check_assemble(&mut buf, Level::Warn, 0xABCD, SITE, &[]);
         assert!(ok);
 
         assert_eq!(buf[0], VERSION);
         assert_eq!(buf[1], LOG_RECORD);
         assert_eq!(read_u16(&buf, 2) as usize, buf.len());
         assert_eq!(buf[4], Level::Warn.to_u8());
-        assert_eq!(read_u16(&buf, 5), FLAG_FORMAT | FLAG_SOURCE | FLAG_THREAD);
+        assert_eq!(read_u16(&buf, 5), FLAG_SITE);
         assert_eq!(buf[7], 0);
         assert_eq!(read_u64(&buf, 8), 0xABCD);
     }
 
     #[test]
-    fn format_and_source_sections_reference_the_static_strs() {
-        let fmt = "value {}";
-        let file = "src/x.rs";
+    fn site_section_references_the_call_site_descriptor() {
         let mut buf = Vec::new();
-        check_assemble(&mut buf, Level::Info, 0, fmt, file, 42, 1, "", &[&1u64]);
+        check_assemble(&mut buf, Level::Info, 0, SITE, &[&1u64]);
 
-        // Format section starts right after the header.
-        let fmt_ptr = read_u64(&buf, HEADER_SIZE);
-        let fmt_len = read_u16(&buf, HEADER_SIZE + 8);
-        assert_eq!(fmt_ptr, fmt.as_ptr() as u64);
-        assert_eq!(fmt_len as usize, fmt.len());
+        // The 8-byte site pointer sits right after the header.
+        let site_ptr = read_u64(&buf, HEADER_SIZE);
+        assert_eq!(site_ptr, SITE as *const Site as u64);
 
-        // Source section follows the 10-byte format section.
-        let src = HEADER_SIZE + FORMAT_SECTION_SIZE;
-        assert_eq!(read_u64(&buf, src), file.as_ptr() as u64);
-        assert_eq!(read_u16(&buf, src + 8) as usize, file.len());
-        assert_eq!(read_u32(&buf, src + 10), 42);
+        // The count byte follows the site section.
+        let count_at = HEADER_SIZE + SITE_SECTION_SIZE;
+        assert_eq!(buf[count_at], 1);
     }
 
     #[test]
@@ -310,16 +292,15 @@ mod tests {
             &mut buf,
             Level::Info,
             0,
-            "{} {}",
-            "f",
-            1,
-            1,
-            "",
+            &Site {
+                fmt: "{} {}",
+                file: "f",
+                line: 1,
+            },
             &[&0x1234u16, &true],
         );
 
-        let args_at =
-            HEADER_SIZE + FORMAT_SECTION_SIZE + SOURCE_SECTION_SIZE + THREAD_SECTION_BASE_SIZE;
+        let args_at = HEADER_SIZE + SITE_SECTION_SIZE;
         assert_eq!(buf[args_at], 2); // count
         assert_eq!(buf[args_at + 1], 0x06); // u16 tag
         assert_eq!(buf[args_at + 2], 0x0A); // bool tag
@@ -331,7 +312,7 @@ mod tests {
     #[test]
     fn total_size_matches_buffer_length() {
         let mut buf = Vec::new();
-        check_assemble(&mut buf, Level::Error, 0, "{}", "f", 1, 1, "", &[&"hello"]);
+        check_assemble(&mut buf, Level::Error, 0, SITE, &[&"hello"]);
         assert_eq!(read_u16(&buf, 2) as usize, buf.len());
     }
 
@@ -339,17 +320,7 @@ mod tests {
     fn rejects_more_than_255_arguments() {
         let args: Vec<&dyn Loggable> = (0..256).map(|_| &1u8 as &dyn Loggable).collect();
         let mut buf = Vec::new();
-        assert!(!check_assemble(
-            &mut buf,
-            Level::Info,
-            0,
-            "x",
-            "f",
-            1,
-            1,
-            "",
-            &args
-        ));
+        assert!(!check_assemble(&mut buf, Level::Info, 0, SITE, &args));
     }
 
     #[test]
@@ -361,58 +332,16 @@ mod tests {
             &mut buf,
             Level::Info,
             0,
-            "{}",
-            "f",
-            1,
-            1,
-            "",
+            SITE,
             &[&big.as_str()]
         ));
     }
 
     #[test]
-    fn flags_control_section_emission() {
-        // When FLAG_SOURCE and FLAG_THREAD are not set, their sections
-        // must be absent from the encoded record. The count byte should
-        // appear immediately after the format section.
-        let mut buf = Vec::new();
-        let flags = FLAG_FORMAT;
-        let total_size = HEADER_SIZE + FORMAT_SECTION_SIZE + COUNT_SIZE;
-
-        buf.reserve(total_size);
-        assemble(
-            buf.as_mut_ptr(),
-            Level::Info,
-            0,
-            flags,
-            "fmt",
-            "f.rs",
-            1,
-            1,
-            "main",
-            0, // n_args
-            total_size,
-            |_buf| { /* no args */ },
-        );
-        // SAFETY: assemble writes exactly total_size bytes.
-        unsafe { buf.set_len(total_size) };
-
-        // Flags in header must only have FLAG_FORMAT.
-        assert_eq!(read_u16(&buf, 5), FLAG_FORMAT);
-
-        // Count byte must be right after the format section, no source
-        // or thread bytes in between.
-        let count_at = HEADER_SIZE + FORMAT_SECTION_SIZE;
-        assert_eq!(buf[count_at], 0); // n_args = 0
-        assert_eq!(buf.len(), count_at + 1);
-    }
-
-    #[test]
     fn zero_args_writes_count_zero() {
         let mut buf = Vec::new();
-        check_assemble(&mut buf, Level::Info, 0, "static", "f", 1, 1, "", &[]);
-        let args_at =
-            HEADER_SIZE + FORMAT_SECTION_SIZE + SOURCE_SECTION_SIZE + THREAD_SECTION_BASE_SIZE;
+        check_assemble(&mut buf, Level::Info, 0, SITE, &[]);
+        let args_at = HEADER_SIZE + SITE_SECTION_SIZE;
         assert_eq!(buf[args_at], 0);
         assert_eq!(buf.len(), args_at + 1);
     }

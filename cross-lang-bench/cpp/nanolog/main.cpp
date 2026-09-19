@@ -31,8 +31,8 @@
 // -- Constants (must match the design doc) ------------------------------
 
 static constexpr int BATCH = 1000;
-static constexpr int SAMPLES = 10'000;
-static constexpr uint64_t TOTAL_MESSAGES = static_cast<uint64_t>(SAMPLES) * BATCH;
+static int g_samples = 10'000;
+static uint64_t g_total_messages = static_cast<uint64_t>(g_samples) * BATCH;
 static constexpr int THREAD_COUNTS[] = {1, 2, 4, 8, 16};
 
 // -- Platform counter ---------------------------------------------------
@@ -148,7 +148,7 @@ struct Output {
 };
 
 static ConfigResult measure_config(double ns_per_tick, Workload wl, int n_threads) {
-    int samples_per_thread = SAMPLES / n_threads;
+    int samples_per_thread = g_samples / n_threads;
 
     std::vector<std::vector<double>> latencies(static_cast<size_t>(n_threads));
     for (int t = 0; t < n_threads; t++) {
@@ -194,7 +194,7 @@ static ConfigResult measure_config(double ns_per_tick, Workload wl, int n_thread
     auto wall_end = std::chrono::steady_clock::now();
     double wall_duration_s = std::chrono::duration<double>(wall_end - wall_start).count();
     uint64_t throughput = static_cast<uint64_t>(std::round(
-        static_cast<double>(TOTAL_MESSAGES) / wall_duration_s));
+        static_cast<double>(g_total_messages) / wall_duration_s));
 
     size_t total = 0;
     for (const auto& sl : latencies) total += sl.size();
@@ -240,7 +240,7 @@ static double resolve_ns_per_tick(double flag_val) {
 
     if (flag_val <= 0.0) {
         std::fprintf(stderr, "error: --ns-per-tick is required and must be positive\n");
-        std::fprintf(stderr, "usage: nanolog_harness --ns-per-tick <float> --output <path.json>\n");
+        std::fprintf(stderr, "usage: nanolog_harness --ns-per-tick <float> [--samples <n>] --output <path.json>\n");
         std::exit(1);
     }
     return flag_val;
@@ -295,22 +295,32 @@ int main(int argc, char* argv[]) {
     for (int i = 1; i < argc; i++) {
         if (std::strcmp(argv[i], "--ns-per-tick") == 0 && i + 1 < argc) {
             ns_per_tick_flag = std::strtod(argv[++i], nullptr);
+        } else if (std::strcmp(argv[i], "--samples") == 0 && i + 1 < argc) {
+            g_samples = std::atoi(argv[++i]);
         } else if (std::strcmp(argv[i], "--output") == 0 && i + 1 < argc) {
             output_path = argv[++i];
         } else {
             std::fprintf(stderr, "error: unknown flag '%s'\n", argv[i]);
-            std::fprintf(stderr, "usage: nanolog_harness --ns-per-tick <float> --output <path.json>\n");
+            std::fprintf(stderr, "usage: nanolog_harness --ns-per-tick <float> [--samples <n>] --output <path.json>\n");
             return 1;
         }
     }
 
     if (!output_path) {
         std::fprintf(stderr, "error: --output is required\n");
-        std::fprintf(stderr, "usage: nanolog_harness --ns-per-tick <float> --output <path.json>\n");
+        std::fprintf(stderr, "usage: nanolog_harness --ns-per-tick <float> [--samples <n>] --output <path.json>\n");
         return 1;
     }
 
     double ns_per_tick = resolve_ns_per_tick(ns_per_tick_flag);
+
+    if (g_samples < 1) {
+        std::fprintf(stderr, "error: --samples must be positive\n");
+        return 1;
+    }
+    g_total_messages = static_cast<uint64_t>(g_samples) * BATCH;
+    std::fprintf(stderr, "samples=%d total_messages=%llu ns_per_tick=%.6f\n",
+        g_samples, static_cast<unsigned long long>(g_total_messages), ns_per_tick);
 
     // Discard all NanoLog output -- we measure the hot-path staging-buffer
     // write only, which is the same for every candidate. NanoLog opens its
@@ -353,8 +363,8 @@ int main(int argc, char* argv[]) {
     out.clock = clock_name;
     out.ns_per_tick = ns_per_tick;
     out.batch_size = BATCH;
-    out.total_messages = TOTAL_MESSAGES;
-    out.samples = SAMPLES;
+    out.total_messages = g_total_messages;
+    out.samples = g_samples;
     out.results = std::move(results);
 
     write_output(out, output_path);
