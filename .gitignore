@@ -22,3 +22,7 @@ Thumbs.db
 
 # Example output
 /logs
+
+# Local python junction (Windows .pyshim)
+/python
+
