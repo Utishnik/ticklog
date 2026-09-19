@@ -22,8 +22,41 @@ const BATCH: usize = 1000;
 /// Number of batch-average samples per (workload, thread_count) config.
 const SAMPLES: usize = 10_000;
 
-/// Total log messages per config: SAMPLES * BATCH.
-const TOTAL_MESSAGES: u64 = (SAMPLES * BATCH) as u64;
+/// The [`Backpressure`] policy selected at build time. `info!` resolves
+/// `__ticklog_backpressure!()` in ticklog's expansion context, so harness
+/// locals can never reach it; the policy therefore rides on a Cargo feature
+/// and is echoed here so the runtime is configured identically.
+fn policy() -> Backpressure {
+    if cfg!(feature = "policy-quill") {
+        Backpressure::Quill
+    } else if cfg!(feature = "policy-nanolog") {
+        Backpressure::NanoLog
+    } else {
+        Backpressure::Block
+    }
+}
+
+// Bridges for the `info!` family. Without a `configure!` invocation the
+// hoisted bridge macros don't exist, so define them (fixed policies only;
+// `max_level` is pinned to Trace like the harness always used).
+#[allow(non_local_definitions)]
+macro_rules! __ticklog_backpressure {
+    () => {
+        if cfg!(feature = "policy-quill") {
+            ticklog::Backpressure::Quill
+        } else if cfg!(feature = "policy-nanolog") {
+            ticklog::Backpressure::NanoLog
+        } else {
+            ticklog::Backpressure::Block
+        }
+    };
+}
+#[allow(non_local_definitions)]
+macro_rules! __ticklog_max_level {
+    () => {
+        ticklog::Level::Trace
+    };
+}
 
 // Platform counter
 /// Read the platform-specific monotonic hardware counter.
@@ -188,7 +221,9 @@ fn percentile(samples: &[f64], p: f64) -> f64 {
 /// Run one (workload, thread_count) configuration and return the
 /// measured percentiles and throughput.
 fn measure_config(cfg: &Config, workload: Workload, n_threads: usize) -> ConfigResult {
-    let samples_per_thread = SAMPLES / n_threads;
+    let samples = cfg.samples;
+    let samples_per_thread = samples / n_threads;
+    let total_messages: u64 = (samples as u64) * (BATCH as u64);
     let barrier = Arc::new(Barrier::new(n_threads));
     let mut handles = Vec::with_capacity(n_threads);
 
@@ -231,7 +266,7 @@ fn measure_config(cfg: &Config, workload: Workload, n_threads: usize) -> ConfigR
     }
 
     // Collect per-thread latency vectors.
-    let mut all_latencies = Vec::with_capacity(SAMPLES);
+    let mut all_latencies = Vec::with_capacity(samples);
     for h in handles {
         match h.join() {
             Ok(v) => all_latencies.extend(v),
@@ -243,7 +278,7 @@ fn measure_config(cfg: &Config, workload: Workload, n_threads: usize) -> ConfigR
     }
 
     let wall_duration_s = wall_start.elapsed().as_secs_f64();
-    let throughput = TOTAL_MESSAGES as f64 / wall_duration_s;
+    let throughput = total_messages as f64 / wall_duration_s;
 
     all_latencies.sort_by(|a, b| a.partial_cmp(b).expect("invariant: latency is finite"));
 
@@ -283,6 +318,8 @@ struct Config {
     backend_core: Option<usize>,
     /// Per-thread ring buffer capacity in bytes (power of two).
     ring_capacity: usize,
+    /// Batch-average samples per (workload, thread_count) config.
+    samples: usize,
     /// Path of a sink file. When set, ticklog writes formatted lines to this
     /// file (truncated) instead of discarding them in a null sink.
     sink_file: Option<PathBuf>,
@@ -318,6 +355,7 @@ fn parse_args() -> Config {
     let mut backend_core = None;
     let mut ring_capacity = None;
     let mut sink_file = None;
+    let mut samples = None;
     let mut candidate_override = None;
 
     let mut i = 1;
@@ -390,12 +428,20 @@ fn parse_args() -> Config {
                 }
                 candidate_override = Some(args[i].clone());
             }
+            "--samples" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("error: --samples requires a value");
+                    process::exit(1);
+                }
+                samples = Some(parse_usize(&args[i], "--samples"));
+            }
             other => {
                 eprintln!("error: unknown flag '{}'", other);
                 eprintln!(
                     "usage: harness --ns-per-tick <float> --output <path.json> \
                      [--threads <n,...>] [--producer-core <n>] [--backend-core <n>] [--ring-capacity <bytes>] \
-                     [--sink-file <path>] [--candidate <name>]"
+                     [--samples <n>] [--sink-file <path>] [--candidate <name>]"
                 );
                 process::exit(1);
             }
@@ -413,6 +459,7 @@ fn parse_args() -> Config {
         producer_core,
         backend_core,
         ring_capacity: ring_capacity.unwrap_or(ticklog::__private::DEFAULT_RING_SIZE),
+        samples: samples.unwrap_or(SAMPLES),
         candidate_name: candidate_override.unwrap_or_else(|| {
             if sink_file.is_some() {
                 "ticklog_file".to_string()
@@ -462,13 +509,19 @@ fn main() {
         Some(path) => BenchSink::File(FileSink::truncate(path).expect("ticklog build")),
         None => BenchSink::Null(NullSink),
     };
-    let guard = ticklog::configure! {
-        sink: sink,
-        max_level: Level::Trace,
-        drain_affinity: drain_affinity,
-        ring_capacity: cfg.ring_capacity,
-        backpressure: Backpressure::Block,
-    }
+    // Bypass `configure!` (macro hygiene would prevent it from seeing harness
+    // locals) and configure the runtime directly with the feature-selected
+    // policy. `info!` uses the crate-root bridge macros above, which resolve
+    // to the same value.
+    let backpressure = policy();
+    let guard = ticklog::__private::__configure_rt(
+        Box::new(sink),
+        0i32,
+        drain_affinity,
+        cfg.ring_capacity,
+        "",
+        backpressure,
+    )
     .expect("ticklog build");
     std::mem::forget(guard);
 
@@ -500,8 +553,8 @@ fn main() {
         clock: clock_name.to_string(),
         ns_per_tick: cfg.ns_per_tick,
         batch_size: BATCH,
-        total_messages: TOTAL_MESSAGES,
-        samples: SAMPLES,
+        total_messages: (cfg.samples as u64) * (BATCH as u64),
+        samples: cfg.samples,
         results,
     };
 

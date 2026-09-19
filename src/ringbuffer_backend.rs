@@ -20,8 +20,8 @@
 //!   records, so the producer blocks during drain I/O. Acceptable for a bench
 //!   backend; never use this for production latency-sensitive logging.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use ringbuffer::RingBuffer as _;
 
@@ -83,11 +83,7 @@ impl RingBuffer {
         let mut backoff = crate::backoff::Backoff::new();
         loop {
             // Lock, check capacity, release before potentially blocking.
-            let len = self
-                .fifo
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .len();
+            let len = self.fifo.lock().unwrap_or_else(|e| e.into_inner()).len();
             // Leave one byte of slack: some ring buffer implementations mark the
             // FIFO full when `len == capacity`, overwriting the oldest element;
             // we must never let that happen.
@@ -99,7 +95,9 @@ impl RingBuffer {
             }
             match policy {
                 Backpressure::Drop => return None,
-                Backpressure::Block => {
+                // Segmented policies require the crate-local ring and are
+                // degraded to Block by `configure!` under a FIFO backend.
+                Backpressure::NanoLog | Backpressure::Quill | Backpressure::Block => {
                     if !self.live.load(Ordering::Relaxed) {
                         return None;
                     }

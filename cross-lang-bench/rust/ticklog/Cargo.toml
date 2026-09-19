@@ -15,6 +15,10 @@ serde_json = "1"
 backend-ringbuffer = ["ticklog/backend-ringbuffer"]
 backend-ringbuf = ["ticklog/backend-ringbuf"]
 backend-triple-buffer = ["ticklog/backend-triple-buffer"]
+# Selects the build-time Backpressure policy the logging code runs under.
+policy-block = []
+policy-nanolog = []
+policy-quill = []
 
 [profile.release]
 lto = "fat"

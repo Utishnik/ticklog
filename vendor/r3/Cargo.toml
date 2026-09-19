@@ -1,0 +1,73 @@
+[package]
+name = "r3"
+version = "0.1.0"
+edition = "2024"
+# Vendored for ticklog at commit b7fcaeb45cc4ff08aee9b8b0dbecc6e93f6cc70b
+# (https://github.com/Utishnik/mytestrs) with one change: the `mimalloc`
+# dependency and the crate's `#[global_allocator]` are removed, because a
+# library must not install a process-wide allocator for every binary that
+# links it (it also conflicts with ticklog's counting-allocator test).
+
+[dependencies]
+allocation_hints = "0.1.0"
+allocator-api2 = "0.4.0"
+bumpalo = { version = "3.20", features = ["collections"] }
+core_affinity = "0.8.3"
+crossbeam-utils = "0.8.22"
+hotpath = { version = "0.24.0" }
+num_cpus = "1.17.0"
+spin = "0.9"
+orx-concurrent-vec = "4"
+boxcar = "0.2"
+triomphe = "0.1"
+branches = { version = "0.5.0", features = ["prefetch"] }
+
+[features]
+hotpath = ["hotpath/hotpath"]
+hotpath-cpu = ["hotpath/hotpath-cpu"]
+# Асинхронный prefetch страниц на Windows через PrefetchVirtualMemory.
+# ВЫКЛЮЧЕН по умолчанию: на практике worker-потоки ядра фолтят страницы
+# в чужом контексте (working-set lock, чужая NUMA-нода) и это даёт
+# регрессию. Включается явно: `cargo build --features win-prefetch-pages`.
+win-prefetch-pages = []
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_System_Memory",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_Foundation",
+    "Win32_Security",
+] }
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+divan = "0.1.21"
+
+[[bench]]
+name = "benche"
+harness = false
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+debug = false
+overflow-checks = false
+incremental = false
+
+[profile.bench]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+
+[profile.native]
+inherits = "release"
+lto = "fat"
+# Для -Zbuild-std нельзя panic="abort": sysroot-шный panic_abort тянет
+# sysroot-шный core, который дублирует build-std core (E0152). Unwind-ранайм
+# собирается из исходников вместе с остальным std.
+panic = "unwind"

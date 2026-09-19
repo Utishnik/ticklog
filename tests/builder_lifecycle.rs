@@ -23,6 +23,7 @@ fn configure_spawns_drain_rejects_second_init_and_joins_on_drop() {
         None,
         ticklog::__private::DEFAULT_RING_SIZE,
         "",
+        ticklog::Backpressure::Drop,
     );
     assert!(matches!(second, Err(TicklogError::AlreadyInitialized)));
 

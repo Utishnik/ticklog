@@ -30,8 +30,8 @@
 //!   Benchmark this backend as a "synchronous single-slot channel" baseline,
 //!   not a buffered one.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use triple_buffer::{Input, Output};
 
@@ -163,7 +163,11 @@ impl RingBuffer {
     /// yet fetched.
     #[allow(dead_code)] // used only by tests
     pub(crate) fn is_empty(&self) -> bool {
-        !self.output.lock().unwrap_or_else(|e| e.into_inner()).updated()
+        !self
+            .output
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .updated()
     }
 }
 
@@ -185,9 +189,7 @@ mod tests {
 
     #[test]
     fn reserve_waits_for_drain_to_consume() {
-        let rb = std::sync::Arc::new(RingBuffer::with_capacity(
-            crate::ring::DEFAULT_RING_SIZE,
-        ));
+        let rb = std::sync::Arc::new(RingBuffer::with_capacity(crate::ring::DEFAULT_RING_SIZE));
         // Publish a value; the drain has not consumed it yet.
         rb.reserve(1, Backpressure::Drop).unwrap();
         rb.commit(b"x");

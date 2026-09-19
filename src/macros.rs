@@ -64,7 +64,7 @@ pub fn dispatch(
 
         #[cfg(not(feature = "fifo-backend"))]
         {
-            if let Some(slot) = tb.ring.reserve(total_size, policy) {
+            if let Some(slot) = crate::thread_buf::reserve_with_policy(tb, total_size, policy) {
                 record::assemble(
                     slot.ptr,
                     level,

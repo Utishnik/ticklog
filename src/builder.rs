@@ -25,6 +25,15 @@ const MAX_TZ_OFFSET: i32 = 50_400;
 pub(crate) const DEFAULT_LINE_PATTERN: &str = "{timestamp} {level} {file}:{line} {message}";
 
 /// What a logging thread does when its buffer is full.
+///
+/// The two segmented strategies ([`NanoLog`] and [`Quill`]) rename the ring:
+/// instead of growing in place they **hand the full buffer to the drain** and
+/// switch to a fresh one, so a producer never has to wait for the drain to
+/// catch up with *its own* backlog. Buffer memory comes from the crate-local
+/// `r3` arena allocator (one region per thread, no cross-thread contention).
+///
+/// [`NanoLog`]: Backpressure::NanoLog
+/// [`Quill`]: Backpressure::Quill
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Backpressure {
@@ -34,6 +43,25 @@ pub enum Backpressure {
     /// Spin until space frees up. Never drops records, but burns CPU while the
     /// buffer stays full. Useful for debugging and tests.
     Block,
+    /// NanoLog-style **bounded** buffer handoff. When the current segment is
+    /// full it is handed to the drain and the thread takes a fresh one from a
+    /// preallocated pool. The thread only blocks when the *whole pool* is
+    /// exhausted; while blocked it does not spin idly — it formats its own
+    /// handed-off segments (the drain's decoding/formatting work) into a
+    /// shared line queue that the drain then writes to the sink.
+    ///
+    /// Memory is bounded by the pool; records are never dropped, only delayed.
+    /// Implemented on the crate-local ring backend (with no `backend-*` Cargo
+    /// feature enabled).
+    NanoLog,
+    /// Quill-style **unbounded** growing queue. Each full segment is handed to
+    /// the drain and a fresh, larger arena-backed segment is allocated, so the
+    /// producer never blocks and never drops. Memory grows without limit (up
+    /// to OOM under sustained overproduction), trading memory for zero loss.
+    ///
+    /// Implemented on the crate-local ring backend (with no `backend-*` Cargo
+    /// feature enabled).
+    Quill,
 }
 
 /// Initializes the logging system and returns a [`Guard`].
@@ -85,6 +113,7 @@ macro_rules! configure {
             $crate::configure!(__pick drain_affinity { $($key : $val ,)* }),
             $crate::configure!(__pick ring_capacity { $($key : $val ,)* }),
             $crate::configure!(__pick format { $($key : $val ,)* }),
+            $crate::configure!(__pick backpressure { $($key : $val ,)* }),
         )
     }};
 
@@ -139,7 +168,8 @@ macro_rules! configure {
 }
 
 /// Runtime portion of [`configure!`]: spawns the drain, calibrates the clock,
-/// claims the ring registry.
+/// claims the ring registry, and (for the segmented policies) builds the
+/// arena-backed buffer pool.
 #[doc(hidden)]
 pub fn __configure_rt(
     sink: Box<dyn LogSink>,
@@ -147,6 +177,7 @@ pub fn __configure_rt(
     drain_affinity: Option<Vec<usize>>,
     ring_capacity: usize,
     format_str: impl Into<String>,
+    backpressure: Backpressure,
 ) -> Result<Guard, TicklogError> {
     if !(MIN_TZ_OFFSET..=MAX_TZ_OFFSET).contains(&timezone_offset) {
         return Err(TicklogError::InvalidTimezoneOffset(timezone_offset));
@@ -167,11 +198,44 @@ pub fn __configure_rt(
     };
     let line_pattern = Template::parse(pattern_str).map_err(TicklogError::InvalidFormatPattern)?;
 
+    let segmented = matches!(backpressure, Backpressure::NanoLog | Backpressure::Quill);
+    // The segmented policies depend on the crate-local (non-FIFO) ring backend.
+    // Under a `backend-*` feature they degrade to `Block`: the semantics are
+    // still "never drop", just without segment handoff.
+    let backpressure = if segmented && cfg!(feature = "fifo-backend") {
+        Backpressure::Block
+    } else {
+        backpressure
+    };
+
+    // Must be set before any producer thread can log, and before the drain
+    // thread starts polling (it consults it on every pass in segmented mode).
+    let _ = crate::thread_buf::BACKPRESSURE.set(backpressure);
+
     REGISTRY
         .set(Mutex::new(Vec::new()))
         .map_err(|_| TicklogError::AlreadyInitialized)?;
 
     let calibration = timestamp::calibrate();
+
+    // Build the segmented buffer machinery before the drain starts so a fast
+    // producer cannot race an uninitialized pool. A side effect of this call:
+    // the pool owns the `r3` arena that all segment buffers are carved from.
+    // Under a `backend-*` feature the module (and this block) is not compiled:
+    // NanoLog/Quill degrade to Block above, so no pool is ever installed.
+    #[cfg(not(feature = "fifo-backend"))]
+    if segmented {
+        let pool = crate::segments::Segments::init(
+            backpressure,
+            ring_capacity,
+            timezone_offset,
+            calibration,
+            line_pattern.clone(),
+        );
+        crate::segments::SEGMENTS
+            .set(pool)
+            .map_err(|_| TicklogError::AlreadyInitialized)?;
+    }
 
     let shutdown = Arc::new(AtomicBool::new(false));
     let drain = Drain::new(
@@ -180,6 +244,7 @@ pub fn __configure_rt(
         Arc::clone(&shutdown),
         calibration,
         line_pattern,
+        segmented && !cfg!(feature = "fifo-backend"),
     );
 
     // The capacity is validated above and REGISTRY succeeded, so this set
@@ -210,16 +275,32 @@ mod tests {
     fn backpressure_discriminants() {
         assert_eq!(Backpressure::Drop as u8, 0);
         assert_eq!(Backpressure::Block as u8, 1);
+        assert_eq!(Backpressure::NanoLog as u8, 2);
+        assert_eq!(Backpressure::Quill as u8, 3);
     }
 
     #[test]
     fn configure_rt_rejects_out_of_range_timezone_offset() {
         assert!(matches!(
-            __configure_rt(Box::new(ConsoleSink::stderr()), 50_401, None, crate::ring::DEFAULT_RING_SIZE, ""),
+            __configure_rt(
+                Box::new(ConsoleSink::stderr()),
+                50_401,
+                None,
+                crate::ring::DEFAULT_RING_SIZE,
+                "",
+                Backpressure::Drop
+            ),
             Err(TicklogError::InvalidTimezoneOffset(50_401))
         ));
         assert!(matches!(
-            __configure_rt(Box::new(ConsoleSink::stderr()), -43_201, None, crate::ring::DEFAULT_RING_SIZE, ""),
+            __configure_rt(
+                Box::new(ConsoleSink::stderr()),
+                -43_201,
+                None,
+                crate::ring::DEFAULT_RING_SIZE,
+                "",
+                Backpressure::Drop
+            ),
             Err(TicklogError::InvalidTimezoneOffset(-43_201))
         ));
     }
@@ -227,7 +308,14 @@ mod tests {
     #[test]
     fn configure_rt_already_initialized() {
         let _ = REGISTRY.set(Mutex::new(Vec::new()));
-        let result = __configure_rt(Box::new(ConsoleSink::stderr()), 0, None, crate::ring::DEFAULT_RING_SIZE, "");
+        let result = __configure_rt(
+            Box::new(ConsoleSink::stderr()),
+            0,
+            None,
+            crate::ring::DEFAULT_RING_SIZE,
+            "",
+            Backpressure::Drop,
+        );
         assert!(matches!(result, Err(TicklogError::AlreadyInitialized)));
     }
 
@@ -235,7 +323,14 @@ mod tests {
     fn configure_rt_rejects_invalid_format_pattern() {
         // We need REGISTRY unset for this to reach the parse step; use an
         // invalid pattern to trigger the error.
-        let result = __configure_rt(Box::new(ConsoleSink::stderr()), 0, None, crate::ring::DEFAULT_RING_SIZE, "{unknown_field}");
+        let result = __configure_rt(
+            Box::new(ConsoleSink::stderr()),
+            0,
+            None,
+            crate::ring::DEFAULT_RING_SIZE,
+            "{unknown_field}",
+            Backpressure::Drop,
+        );
         assert!(matches!(result, Err(TicklogError::InvalidFormatPattern(_))));
     }
 
@@ -243,12 +338,26 @@ mod tests {
     fn configure_rt_rejects_invalid_ring_capacity() {
         // Not a power of two.
         assert!(matches!(
-            __configure_rt(Box::new(ConsoleSink::stderr()), 0, None, 1_000_000, "{}"),
+            __configure_rt(
+                Box::new(ConsoleSink::stderr()),
+                0,
+                None,
+                1_000_000,
+                "{}",
+                Backpressure::Drop
+            ),
             Err(TicklogError::InvalidRingCapacity(1_000_000))
         ));
         // Smaller than the minimum slot size.
         assert!(matches!(
-            __configure_rt(Box::new(ConsoleSink::stderr()), 0, None, 8, "{}"),
+            __configure_rt(
+                Box::new(ConsoleSink::stderr()),
+                0,
+                None,
+                8,
+                "{}",
+                Backpressure::Drop
+            ),
             Err(TicklogError::InvalidRingCapacity(8))
         ));
     }

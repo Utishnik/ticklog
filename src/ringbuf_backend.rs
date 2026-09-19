@@ -21,8 +21,8 @@
 //!   `backend-ringbuffer`) so the buffer is never observed at the exact full
 //!   bound, which some ring implementations treat as an overwrite condition.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use ringbuf::traits::{Consumer as _, Observer as _, Producer as _, Split};
 
@@ -102,7 +102,9 @@ impl RingBuffer {
             drop(prod);
             match policy {
                 Backpressure::Drop => return None,
-                Backpressure::Block => {
+                // Segmented policies require the crate-local ring and are
+                // degraded to Block by `configure!` under a FIFO backend.
+                Backpressure::NanoLog | Backpressure::Quill | Backpressure::Block => {
                     if !self.live.load(Ordering::Relaxed) {
                         return None;
                     }
@@ -155,7 +157,10 @@ impl RingBuffer {
     /// Whether the FIFO currently holds no bytes.
     #[allow(dead_code)] // used only by tests
     pub(crate) fn is_empty(&self) -> bool {
-        self.cons.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
+        self.cons
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty()
     }
 }
 

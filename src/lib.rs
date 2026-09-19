@@ -160,12 +160,6 @@
 
 mod affinity;
 mod backoff;
-#[cfg(feature = "backend-ringbuffer")]
-mod ringbuffer_backend;
-#[cfg(feature = "backend-ringbuf")]
-mod ringbuf_backend;
-#[cfg(feature = "backend-triple-buffer")]
-mod triple_buffer_backend;
 mod builder;
 mod drain;
 mod encode;
@@ -176,9 +170,17 @@ mod level;
 mod macros;
 mod record;
 mod ring;
+#[cfg(feature = "backend-ringbuf")]
+mod ringbuf_backend;
+#[cfg(feature = "backend-ringbuffer")]
+mod ringbuffer_backend;
+#[cfg(not(feature = "fifo-backend"))]
+mod segments;
 mod sink;
 mod thread_buf;
 mod timestamp;
+#[cfg(feature = "backend-triple-buffer")]
+mod triple_buffer_backend;
 pub use affinity::pin_thread;
 pub use builder::Backpressure;
 pub use error::TicklogError;

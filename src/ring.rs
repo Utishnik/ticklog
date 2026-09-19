@@ -71,13 +71,39 @@ mod custom {
     //! (Release). Control fields are split across two cache lines — one for
     //! each side — so the producer and drain never contend for the same line
     //! on the hot path.
+    //!
+    //! Under the segmented policies ([`Backpressure::NanoLog`] and
+    //! [`Backpressure::Quill`]) the ring storage is carved from the `r3` arena
+    //! allocator and a full ring is *handed off* to the drain instead of grown
+    //! in place; see [`crate::segments`].
 
     use std::cell::UnsafeCell;
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
     use super::{Reservation, SLOT_SIZE, align_up};
     use crate::builder::Backpressure;
     use crate::record::{END_OF_BUFFER, MAX_RECORD_SIZE, VERSION};
+
+    /// Where the ring's bytes live. The classic path uses a crate-allocated
+    /// boxed slice; the segmented paths allocate from the shared `r3` arena so
+    /// per-thread buffers never touch the global allocator on the hot path.
+    // SAFETY: both variants own their memory for as long as the `RingBuffer`
+    // (either the `Box` owns it, or the `Arc<r3::Arena>` keeps the region
+    // alive). The raw arena pointer derives from an allocation that is never
+    // reclaimed before the arena itself drops, and the arena is kept alive by
+    // every ring that references it, so no ring can outlive its memory.
+    pub(crate) enum DataStorage {
+        /// Default storage: `UnsafeCell<u8>` interior mutability, same layout
+        /// guarantees as before (never a whole-slice borrow racing a writer).
+        Box(Box<[UnsafeCell<u8>]>),
+        /// Arena-backed storage for the segmented policies. `_keep` pins the
+        /// arena so the region outlives this ring.
+        Arena {
+            ptr: *mut u8,
+            _keep: Arc<r3::Arena<u8>>,
+        },
+    }
 
     /// Producer-cache-line half of the control state. Only the producer
     /// writes `head`; only the producer touches `tail_cache`.
@@ -124,15 +150,38 @@ mod custom {
         /// `capacity - 1`, the index mask.
         mask: u64,
 
-        /// Ring storage as a slice of per-byte cells. The `UnsafeCell<u8>`
-        /// interior mutability lets the producer and drain reach disjoint bytes
-        /// through a shared `&self` without ever forming a `&`/`&mut` spanning
-        /// the buffer: a whole-slice borrow on one thread overlapping the
-        /// other's is a Stacked/Tree-Borrows violation (and a data race on the
-        /// retag) even when the byte ranges are disjoint. The base pointer is
-        /// taken with `data.as_ptr()`, which for `UnsafeCell` bytes is not a
-        /// read of their contents and does not disable the owning allocation.
-        data: Box<[UnsafeCell<u8>]>,
+        /// Backing storage (boxed by default, arena-backed for segmented
+        /// policies).
+        data: DataStorage,
+
+        // ===== Segmented-policy fields =====
+        /// Monotonic registration serial, assigned by
+        /// [`crate::thread_buf::register_ring`]. Lets the drain tell a reused
+        /// (recycled) ring object apart from its previous incarnation, so it
+        /// never drains a re-incarnated ring through a stale list entry.
+        serial: AtomicU64,
+        /// Set while a blocked producer owns this ring for cooperative
+        /// formatting (NanoLog pool exhaustion). The drain skips a reserved
+        /// ring until the reservation clears, guaranteeing exactly one worker
+        /// formats each handed-off segment.
+        helper_reserved: AtomicBool,
+        /// Set by the drain for the duration of a drain pass over this ring,
+        /// so a blocked producer about to cooperatively format it waits for
+        /// the drain to finish reading before taking over (see
+        /// [`crate::segments`]). Paired Acquire/Release with
+        /// [`reserve_for_helper`](Self::reserve_for_helper).
+        draining: AtomicBool,
+        /// True when this ring must be returned to the `r3`-arena pool after
+        /// it is fully drained (NanoLog), instead of being dropped (Quill).
+        recyclable: bool,
+        /// True when the drain fully drained this ring and moved it back to
+        /// the pool; prevents double-recycling.
+        recycled: AtomicBool,
+        /// Set by the producer the moment it switches to a fresh segment
+        /// (handoff). Only after this flag is set may the drain recycle the
+        /// (fully drained) ring back to the pool: before that the ring is
+        /// still an active producer's current buffer and must stay put.
+        handed_off: AtomicBool,
     }
 
     // SAFETY: RingBuffer is safe to share between threads because the SPSC
@@ -147,10 +196,18 @@ mod custom {
     //   [head..head+record_size], the drain reads from [tail..head]. The
     //   invariant tail <= head ensures these ranges never overlap. Each byte
     //   is accessed by exactly one thread at any time.
+    // - `r3::Arena` is `Send + Sync` for `Send` element types (`u8` here);
+    //   ring storage either owns its `Box` or keeps its arena alive via `Arc`.
+    unsafe impl Send for RingBuffer {}
+
+    // SAFETY: RingBuffer is safe to share between threads because the SPSC
+    // protocol guarantees the producer and drain never touch the same state
+    // concurrently (see the `Send` impl above; the raw storage pointer in the
+    // arena-backed variant is only ever dereferenced under that protocol).
     unsafe impl Sync for RingBuffer {}
 
     impl RingBuffer {
-/// Creates a new ring buffer of the default
+        /// Creates a new ring buffer of the default
         /// [`DEFAULT_RING_SIZE`](super::DEFAULT_RING_SIZE).
         #[allow(dead_code)] // used only by tests; `with_capacity` is the hot path
         pub(crate) fn new() -> Self {
@@ -173,10 +230,44 @@ mod custom {
             // zero-filled `Box<[u8]>` and a `Box<[UnsafeCell<u8>]>` of the same
             // length share layout. The cast reinterprets the one heap buffer and
             // preserves the slice length metadata.
-            // todo arena alloc
             let bytes = vec![0u8; capacity].into_boxed_slice();
             let data: Box<[UnsafeCell<u8>]> =
                 unsafe { Box::from_raw(Box::into_raw(bytes) as *mut [UnsafeCell<u8>]) };
+            Self::from_storage(DataStorage::Box(data), capacity, false)
+        }
+
+        /// Creates a zero-initialized ring backed by the shared `r3` arena.
+        /// Arena regions are per-thread, so carving this ring never takes a
+        /// global allocation lock and never touches the process allocator.
+        pub(crate) fn with_capacity_arena(
+            capacity: usize,
+            arena: Arc<r3::Arena<u8>>,
+            recyclable: bool,
+        ) -> Self {
+            assert!(
+                capacity.is_power_of_two() && capacity >= SLOT_SIZE,
+                "invariant: ring capacity must be a power of two >= SLOT_SIZE, got {capacity}"
+            );
+            // SAFETY: `alloc_uninitialized` gives `capacity` readable/writable
+            // bytes inside a region the arena keeps alive; the `Arc` in the
+            // storage keeps the arena (and thus the bytes) valid for the whole
+            // lifetime of this ring. Zero-fill matches the `Box` constructor,
+            // which the drain relies on to treat zeroed slots as empty.
+            let slice = unsafe { arena.alloc_uninitialized(capacity) };
+            let ptr = slice.as_mut_ptr() as *mut u8;
+            // SAFETY: the whole `capacity`-byte region is initialized above.
+            unsafe {
+                std::ptr::write_bytes(ptr, 0, capacity);
+            }
+            Self::from_storage(
+                DataStorage::Arena { ptr, _keep: arena },
+                capacity,
+                recyclable,
+            )
+        }
+
+        /// Shared construction tail for both storage paths.
+        fn from_storage(data: DataStorage, capacity: usize, recyclable: bool) -> Self {
             Self {
                 producer: crossbeam_utils::CachePadded::new(ProducerLine {
                     head: AtomicU64::new(0),
@@ -190,7 +281,114 @@ mod custom {
                 capacity,
                 mask: (capacity - 1) as u64,
                 data,
+                serial: AtomicU64::new(0),
+                helper_reserved: AtomicBool::new(false),
+                draining: AtomicBool::new(false),
+                recyclable,
+                recycled: AtomicBool::new(false),
+                handed_off: AtomicBool::new(false),
             }
+        }
+
+        /// Registration serial (see the field docs). Assigned by
+        /// [`crate::thread_buf::register_ring`].
+        #[inline(always)]
+        pub(crate) fn serial(&self) -> u64 {
+            self.serial.load(Ordering::Relaxed)
+        }
+
+        /// Assigns the next registration serial. Called by
+        /// [`crate::thread_buf::register_ring`].
+        pub(crate) fn set_serial(&self, serial: u64) {
+            self.serial.store(serial, Ordering::Relaxed);
+        }
+
+        /// Whether a blocked producer has reserved this segment for
+        /// cooperative formatting (NanoLog pool exhaustion).
+        #[inline(always)]
+        pub(crate) fn helper_reserved(&self) -> bool {
+            self.helper_reserved.load(Ordering::Acquire)
+        }
+
+        /// Marks the segment as reserved by its producer for cooperative
+        /// formatting. The drain skips reserved segments until they clear.
+        #[inline(always)]
+        pub(crate) fn reserve_for_helper(&self) {
+            self.helper_reserved.store(true, Ordering::Release);
+        }
+
+        /// Clears the helper reservation after the segment was formatted.
+        #[inline(always)]
+        pub(crate) fn clear_helper_reservation(&self) {
+            self.helper_reserved.store(false, Ordering::Release);
+        }
+
+        /// Marks the ring as being read by the drain for one drain pass.
+        /// A blocked producer waiting to cooperatively format this segment
+        /// spins on [`draining`](Self::draining) before touching it.
+        #[inline(always)]
+        pub(crate) fn mark_draining(&self) {
+            self.draining.store(true, Ordering::Release);
+        }
+
+        /// Clears the drain-read marker after a drain pass over the ring.
+        #[inline(always)]
+        pub(crate) fn clear_draining(&self) {
+            self.draining.store(false, Ordering::Release);
+        }
+
+        /// Whether the drain is currently reading this ring.
+        #[inline(always)]
+        pub(crate) fn draining(&self) -> bool {
+            self.draining.load(Ordering::Acquire)
+        }
+
+        /// Whether this ring's storage came from the bounded NanoLog pool and
+        /// must be returned there after it is drained.
+        #[inline(always)]
+        pub(crate) fn recyclable(&self) -> bool {
+            self.recyclable
+        }
+
+        /// Marks a fully drained pool ring as recycled so neither the drain
+        /// nor a producer recycles it twice.
+        pub(crate) fn mark_recycled(&self) -> bool {
+            !self.recycled.swap(true, Ordering::AcqRel)
+        }
+
+        /// Resets all counters for reuse from the pool. The ring's storage is
+        /// untouched (it still belongs to the arena), only the control state is
+        /// rewound so the next producer starts from a clean, empty ring.
+        ///
+        /// Must only be called when no thread is reading or writing the ring.
+        pub(crate) fn reset_for_reuse(&self) {
+            self.producer.head.store(0, Ordering::Relaxed);
+            self.drain.tail.store(0, Ordering::Relaxed);
+            // SAFETY: the caller guarantees exclusive access (the ring is
+            // parked in the pool, not referenced by producer or drain).
+            unsafe {
+                *self.producer.tail_cache.get() = 0;
+                *self.drain.head_cache.get() = 0;
+            }
+            self.helper_reserved.store(false, Ordering::Release);
+            self.draining.store(false, Ordering::Release);
+            self.recycled.store(false, Ordering::Release);
+            self.handed_off.store(false, Ordering::Release);
+            self.live.store(true, Ordering::Release);
+        }
+
+        /// Marks this ring as handed off: its producer switched to a fresh
+        /// segment and will never write here again. Frees the ring for
+        /// recycling once the drain has fully drained it.
+        #[inline(always)]
+        pub(crate) fn mark_handed_off(&self) {
+            self.handed_off.store(true, Ordering::Release);
+        }
+
+        /// Whether the producer has moved past this ring.
+        #[inline(always)]
+        pub(crate) fn handed_off(&self) -> bool {
+            self.handed_off.load(Ordering::Acquire)
         }
 
         /// Producer's `head` atomic: stored with Release on publish, loaded
@@ -236,7 +434,10 @@ mod custom {
         /// byte ranges it owns.
         #[inline(always)]
         pub(crate) fn data_ptr(&self) -> *mut u8 {
-            self.data.as_ptr() as *mut u8
+            match &self.data {
+                DataStorage::Box(data) => data.as_ptr() as *mut u8,
+                DataStorage::Arena { ptr, .. } => *ptr,
+            }
         }
 
         /// Reserves a slot in the ring for a record of `total_size` bytes.
@@ -253,7 +454,11 @@ mod custom {
         /// Single-producer: the calling thread is the sole writer of this
         /// ring's `head` and `tail_cache`.
         #[inline]
-        pub(crate) fn reserve(&self, total_size: usize, policy: Backpressure) -> Option<Reservation> {
+        pub(crate) fn reserve(
+            &self,
+            total_size: usize,
+            policy: Backpressure,
+        ) -> Option<Reservation> {
             debug_assert!(
                 total_size <= MAX_RECORD_SIZE,
                 "invariant: total_size must fit the u16 total_size field"
@@ -335,11 +540,7 @@ mod custom {
             // SAFETY: `tail_cache` is producer-private; only this thread touches
             // it.
             let cached = unsafe { *self.tail_cache() };
-            if head
-                .wrapping_add(needed)
-                .wrapping_sub(cached)
-                <= self.mask()
-            {
+            if head.wrapping_add(needed).wrapping_sub(cached) <= self.mask() {
                 let tail = self.tail().load(Ordering::Acquire);
                 unsafe { *self.tail_cache() = tail };
                 return true;
@@ -354,15 +555,16 @@ mod custom {
                 let tail = self.tail().load(Ordering::Acquire);
                 // SAFETY: producer-private, as above.
                 unsafe { *self.tail_cache() = tail };
-                if head
-                    .wrapping_add(needed)
-                    .wrapping_sub(tail)
-                    <= self.mask()
-                {
+                if head.wrapping_add(needed).wrapping_sub(tail) <= self.mask() {
                     return true;
                 }
                 match policy {
                     Backpressure::Drop => return false,
+                    // Segmented policies never spin in place: a full segment
+                    // is handed off and the producer switches to a fresh one.
+                    // The "blocked while the pool is exhausted" behavior lives
+                    // in the producer's handoff path (`crate::segments`).
+                    Backpressure::NanoLog | Backpressure::Quill => return false,
                     Backpressure::Block => {
                         if !self.live.load(Ordering::Relaxed) {
                             return false;
@@ -655,10 +857,7 @@ mod custom {
             let eob = (start & (CAP as u64 - 1)) as usize;
             assert_eq!(d[eob], VERSION);
             assert_eq!(d[eob + 1], END_OF_BUFFER);
-            assert_eq!(
-                u16::from_le_bytes([d[eob + 2], d[eob + 3]]) as u64,
-                slot
-            );
+            assert_eq!(u16::from_le_bytes([d[eob + 2], d[eob + 3]]) as u64, slot);
             // The record wrapped to offset 0.
             assert_eq!(&d[..record.len()], &record[..]);
         }
@@ -712,10 +911,10 @@ mod custom {
 
 // The backends are mutually exclusive features; if more than one is enabled
 // the first in this order wins, so the re-export never collides.
-#[cfg(feature = "backend-ringbuffer")]
-pub(crate) use crate::ringbuffer_backend::RingBuffer;
 #[cfg(all(feature = "backend-ringbuf", not(feature = "backend-ringbuffer")))]
 pub(crate) use crate::ringbuf_backend::RingBuffer;
+#[cfg(feature = "backend-ringbuffer")]
+pub(crate) use crate::ringbuffer_backend::RingBuffer;
 #[cfg(all(
     feature = "backend-triple-buffer",
     not(feature = "backend-ringbuffer"),
@@ -743,10 +942,7 @@ mod tests {
     #[test]
     fn reservation_roundtrips_fields() {
         let ptr = 0x1234 as *mut u8;
-        let r = Reservation {
-            ptr,
-            head: 42,
-        };
+        let r = Reservation { ptr, head: 42 };
         assert_eq!(r.ptr, ptr);
         assert_eq!(r.head, 42);
     }

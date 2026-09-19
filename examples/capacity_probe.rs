@@ -28,8 +28,8 @@
 //! Output is one CSV line: `backend,capacity,threads,records,elapsed_ms,ns_per_log,recs_per_sec`.
 
 use std::hint;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use ticklog::{Backpressure, Level, info, warm_up};
@@ -78,21 +78,23 @@ fn main() {
     let mut handles = Vec::with_capacity(threads);
     for t in 0..threads {
         let gate = Arc::clone(&gate);
-        handles.push(std::thread::Builder::new()
-            .name(format!("probe-{t}"))
-            .spawn(move || {
-                // Move the one-time thread-local allocation off the timed path.
-                warm_up().ok();
-                while !gate.load(Ordering::Acquire) {
-                    hint::spin_loop();
-                }
-                let mut i = 0u64;
-                for _ in 0..per_thread {
-                    i = i.wrapping_add(1);
-                    info!("x={}", i);
-                }
-            })
-            .expect("spawn producer"));
+        handles.push(
+            std::thread::Builder::new()
+                .name(format!("probe-{t}"))
+                .spawn(move || {
+                    // Move the one-time thread-local allocation off the timed path.
+                    warm_up().ok();
+                    while !gate.load(Ordering::Acquire) {
+                        hint::spin_loop();
+                    }
+                    let mut i = 0u64;
+                    for _ in 0..per_thread {
+                        i = i.wrapping_add(1);
+                        info!("x={}", i);
+                    }
+                })
+                .expect("spawn producer"),
+        );
     }
 
     let t0 = Instant::now();

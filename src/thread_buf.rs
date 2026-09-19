@@ -4,12 +4,17 @@
 //! [`UnsafeCell`] slot. The global [`REGISTRY`] tracks all active rings.
 
 use std::cell::{Cell, UnsafeCell};
+#[cfg(not(feature = "fifo-backend"))]
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 
+use crate::builder::Backpressure;
 use crate::error::TicklogError;
 use crate::record::THREAD_SECTION_BASE_SIZE;
+#[cfg(not(feature = "fifo-backend"))]
+use crate::ring::Reservation;
 use crate::ring::{DEFAULT_RING_SIZE, RingBuffer};
 
 /// A thread's local ring buffer and cached metadata.
@@ -19,6 +24,13 @@ use crate::ring::{DEFAULT_RING_SIZE, RingBuffer};
 pub(crate) struct ThreadBuf {
     /// The ring buffer this thread writes records into.
     pub(crate) ring: Arc<RingBuffer>,
+    /// A handed-off segment that this producer reserved for cooperative
+    /// formatting while it waits for a free NanoLog pool segment. At most one
+    /// outstanding segment per producer: a blocked producer holds exactly one
+    /// full segment and cannot produce more until it unblocks. The
+    /// reservation is cleared in [`Drop`] so a dying producer never leaves
+    /// the drain waiting on it.
+    pub(crate) helper: Option<Arc<RingBuffer>>,
     /// Cached stable thread identifier.
     pub(crate) thread_id: u64,
     /// Cached thread name. Falls back to `<unnamed>` when the OS thread has no name.
@@ -33,6 +45,14 @@ pub(crate) struct ThreadBuf {
 
 impl Drop for ThreadBuf {
     fn drop(&mut self) {
+        // A reserved-but-unformatted segment (producer exited mid-wait) must
+        // not leave the drain blocked on it: clear the reservation and mark
+        // the segment dead so the drain's final drain recycles it.
+        #[cfg(not(feature = "fifo-backend"))]
+        if let Some(ring) = self.helper.take() {
+            ring.clear_helper_reservation();
+            ring.live.store(false, Ordering::Release);
+        }
         // Signal to the drain: no more records will be written.
         // Release pairs with the drain's Acquire load of `live`,
         // guaranteeing all prior head stores are visible.
@@ -52,6 +72,16 @@ const _: () = assert!(THREAD_SECTION_BASE_SIZE + MAX_THREAD_NAME_LEN <= u16::MAX
 /// Falls back to [`DEFAULT_RING_SIZE`] when the ring registry is initialized
 /// directly (as in tests) without a matching configure call.
 pub(crate) static RING_CAPACITY: OnceLock<usize> = OnceLock::new();
+
+/// The active [`Backpressure`] policy, set once at [`crate::configure!`] time.
+/// The drain and the segmented handoff path consult it on every pass.
+pub(crate) static BACKPRESSURE: OnceLock<Backpressure> = OnceLock::new();
+
+/// Monotonic registration counter for ring `serial`s. Each registration of a
+/// ring object (including re-registration of a recycled pool segment) stamps a
+/// fresh serial, which lets the drain distinguish a segment's incarnations.
+#[cfg(not(feature = "fifo-backend"))]
+static NEXT_SERIAL: AtomicU64 = AtomicU64::new(0);
 
 /// Extracts a stable `u64` identifier from [`std::thread::ThreadId`] by
 /// parsing its `Debug` representation.
@@ -147,6 +177,15 @@ where
 
         if opt.is_none() {
             let capacity = RING_CAPACITY.get().copied().unwrap_or(DEFAULT_RING_SIZE);
+            #[cfg(not(feature = "fifo-backend"))]
+            let ring = if crate::segments::Segments::installed() {
+                // Segmented policies allocate a producer's first buffer from
+                // the arena-backed pool instead of the crate allocator.
+                crate::segments::Segments::get().initial_ring()
+            } else {
+                Arc::new(RingBuffer::with_capacity(capacity))
+            };
+            #[cfg(feature = "fifo-backend")]
             let ring = Arc::new(RingBuffer::with_capacity(capacity));
             register_ring(Arc::clone(&ring));
             let thread_name: String = thread::current()
@@ -168,6 +207,7 @@ where
             let thread_section_size: u16 = (THREAD_SECTION_BASE_SIZE + thread_name.len()) as u16;
             *opt = Some(ThreadBuf {
                 ring,
+                helper: None,
                 thread_id: get_stable_thread_id(),
                 thread_name,
                 thread_section_size,
@@ -190,6 +230,10 @@ pub(crate) static REGISTRY: OnceLock<Mutex<Vec<Arc<RingBuffer>>>> = OnceLock::ne
 
 /// Registers a ring buffer with the global [`REGISTRY`].
 ///
+/// Re-registering an already-registered ring object (a recycled pool segment)
+/// bumps its `serial` in place instead of adding a duplicate entry; the drain
+/// uses the serial to tell the incarnations apart.
+///
 /// # Panics
 ///
 /// Panics if the [`REGISTRY`] has not been initialized.
@@ -199,7 +243,81 @@ pub(crate) fn register_ring(ring: Arc<RingBuffer>) {
         .expect("invariant: ring registry not initialized; call ticklog::configure! before logging")
         .lock()
         .expect("invariant: ring registry mutex poisoned by a panic in another thread");
-    rings.push(ring);
+    // Stamp a fresh serial. Happens under the registry lock so the drain's
+    // serial checks and any in-place registry replacement below stay atomic
+    // with respect to re-registration.
+    #[cfg(not(feature = "fifo-backend"))]
+    let serial = NEXT_SERIAL.fetch_add(1, Ordering::Relaxed);
+    #[cfg(not(feature = "fifo-backend"))]
+    ring.set_serial(serial);
+    if let Some(existing) = rings.iter_mut().find(|r| Arc::ptr_eq(r, &ring)) {
+        *existing = ring;
+    } else {
+        rings.push(ring);
+    }
+}
+
+/// Reserves space for a record, applying the full backpressure policy.
+///
+/// Beyond the ring's own policy handling (`Drop` discards, `Block` spins),
+/// the segmented policies (`NanoLog`, `Quill`) *hand the full segment to the
+/// drain* and switch to a fresh arena-backed one instead of waiting:
+///
+/// - **Quill** carves a fresh segment, so the producer never blocks.
+/// - **NanoLog** claims a pooled segment; when the pool is exhausted the
+///   segment is reserved and the producer formats it itself (the drain's
+///   work) into the shared line queue, recycling it to free the needed spare.
+///
+/// Returns `None` when the record must be dropped ([`Backpressure::Drop`], or
+/// teardown under a segmented policy).
+#[cfg(not(feature = "fifo-backend"))]
+#[inline(always)]
+pub(crate) fn reserve_with_policy(
+    tb: &mut ThreadBuf,
+    total_size: usize,
+    policy: Backpressure,
+) -> Option<Reservation> {
+    match policy {
+        Backpressure::Drop | Backpressure::Block => tb.ring.reserve(total_size, policy),
+        Backpressure::NanoLog | Backpressure::Quill => {
+            // Reachable under fifo-backend only after `configure!` degraded
+            // the policy to Block, so the pool is never installed here: the
+            // ring handles it (Block spin / no-op).
+            if !crate::segments::Segments::installed() {
+                return tb.ring.reserve(total_size, policy);
+            }
+            let segments = crate::segments::Segments::get();
+            loop {
+                if let Some(slot) = tb.ring.reserve(total_size, policy) {
+                    return Some(slot);
+                }
+                // The current segment is full: hand it to the drain and take
+                // a fresh one.
+                tb.ring.mark_handed_off();
+                let new_ring = if policy == Backpressure::NanoLog {
+                    let spare = segments.try_take_spare();
+                    match spare {
+                        // A free pooled segment: no need to block, the drain
+                        // will drain the old one inline.
+                        Some(spare) => spare,
+                        None => {
+                            // Pool exhausted: reserve our segment and format
+                            // it ourselves while we wait for a spare.
+                            tb.ring.reserve_for_helper();
+                            tb.helper = Some(Arc::clone(&tb.ring));
+                            segments.first_ring(&mut tb.helper, Some(&tb.ring.live))?
+                        }
+                    }
+                } else {
+                    segments.alloc_fresh()
+                };
+                register_ring(Arc::clone(&new_ring));
+                tb.ring = new_ring;
+                // Try the fresh (empty) segment; the loop also re-enters after
+                // any future handoff.
+            }
+        }
+    }
 }
 
 /// Prepares the calling thread for logging by allocating its buffer up front,
@@ -239,6 +357,7 @@ mod tests {
         let ring = Arc::new(RingBuffer::new());
         let tb = ThreadBuf {
             ring: Arc::clone(&ring),
+            helper: None,
             thread_id: 42,
             thread_name: "test-thread".into(),
             thread_section_size: (THREAD_SECTION_BASE_SIZE + "test-thread".len()) as u16,
@@ -259,6 +378,7 @@ mod tests {
         let ring = Arc::new(RingBuffer::new());
         let tb = ThreadBuf {
             ring: Arc::clone(&ring),
+            helper: None,
             thread_id: 1,
             thread_name: "t".into(),
             thread_section_size: THREAD_SECTION_BASE_SIZE as u16,
@@ -276,6 +396,7 @@ mod tests {
         let other = Arc::clone(&ring);
         let tb = ThreadBuf {
             ring: Arc::clone(&ring),
+            helper: None,
             thread_id: 1,
             thread_name: "t".into(),
             thread_section_size: THREAD_SECTION_BASE_SIZE as u16,

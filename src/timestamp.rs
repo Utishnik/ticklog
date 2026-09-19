@@ -265,10 +265,7 @@ fn counter_frequency() -> u64 {
     1_000_000_000
 }
 
-#[cfg(all(
-    not(miri),
-    not(any(target_arch = "x86_64", target_arch = "aarch64"))
-))]
+#[cfg(all(not(miri), not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
 fn counter_frequency() -> u64 {
     // Fallback: raw_timestamp() returns nanoseconds directly, so 1 tick = 1 ns.
     1_000_000_000

@@ -25,17 +25,14 @@ use crate::timestamp::{Calibration, format_iso8601, ticks_to_ns};
 const SPIN_MIN: u32 = 8;
 /// Upper bound on the spin batch. Caps worst-case wakeup latency.
 const SPIN_CAP: u32 = 256;
-/// Re-scan the ring registry once every this many poll iterations. Must be a
-/// power of two so the free-running sync counter stays aligned across its u32
-/// wrap. Bounds how stale the drain's local ring list can become without
-/// locking the registry mutex on every pass.
+// Re-scan the ring registry once every this many poll iterations. Must be a
+// power of two so the free-running sync counter stays aligned across its u32
+// wrap. Bounds how stale the drain's local ring list can become without
+// locking the registry mutex on every pass.
 const SYNC_EVERY: u32 = 1024;
-/// Mask selecting one pass in every `SYNC_EVERY`. Valid because `SYNC_EVERY` is
-/// a power of two.
-const SYNC_MASK: u32 = SYNC_EVERY - 1;
 
 // Fail the build if SYNC_EVERY is ever set to a non-power-of-two, which would
-// misalign SYNC_MASK across the counter's u32 wrap.
+// misalign the derived sync mask across the counter's u32 wrap.
 const _: () = assert!(SYNC_EVERY.is_power_of_two());
 
 /// A bounded raw-pointer byte parser over one record slice. Every read is
@@ -249,9 +246,16 @@ pub(crate) struct Drain {
     sink: Box<dyn LogSink>,
     timezone_offset: i32,
     shutdown: Arc<AtomicBool>,
-    rings: Vec<Arc<RingBuffer>>,
+    /// `(ring, registration serial)`. The serial lets the drain distinguish a
+    /// recycled pool segment's incarnations so it never drains a reincarnated
+    /// ring through a stale list entry.
+    rings: Vec<(Arc<RingBuffer>, u64)>,
     calibration: Calibration,
     line_pattern: Template,
+    /// True when a segmented backpressure policy is active: the drain then
+    /// syncs the registry every pass, waits on helper-reserved segments, and
+    /// flushes the shared producer-helper line queue once per pass.
+    segmented: bool,
 }
 
 impl Drain {
@@ -264,6 +268,7 @@ impl Drain {
         shutdown: Arc<AtomicBool>,
         calibration: Calibration,
         line_pattern: Template,
+        segmented: bool,
     ) -> Self {
         Self {
             sink,
@@ -272,6 +277,7 @@ impl Drain {
             rings: Vec::new(),
             calibration,
             line_pattern,
+            segmented,
         }
     }
 
@@ -299,12 +305,19 @@ impl Drain {
                 break;
             }
 
-            // Sync on a coarse cadence, not every iteration: sync_rings() locks
-            // the global registry mutex. since_sync free-runs and wraps;
-            // SYNC_EVERY being a power of two keeps the mask aligned across the
-            // wrap, so every SYNC_EVERY-th pass syncs. A ring registered between
-            // syncs keeps its records in its own buffer until the next sync.
-            if (since_sync & SYNC_MASK) == 0 {
+            // Re-scan the ring registry on a coarse cadence in the classic path;
+            // under a segmented policy registrations churn on every handoff, so
+            // the registry is re-synced every pass instead. Both values are
+            // powers of two so the free-running counter stays aligned across
+            // its u32 wrap.
+            let sync_every: u32 = if self.segmented { 1 } else { SYNC_EVERY };
+            let sync_mask: u32 = sync_every - 1;
+
+            // sync_rings() locks the global registry mutex; since_sync free-runs
+            // and wraps, and the power-of-two mask keeps the alignment across
+            // the wrap. A ring registered between syncs keeps its records in its
+            // own buffer until the next sync.
+            if (since_sync & sync_mask) == 0 {
                 self.sync_rings(&mut staging, &mut buf);
             }
             since_sync = since_sync.wrapping_add(1);
@@ -346,9 +359,10 @@ impl Drain {
     }
 
     /// Syncs the drain's local ring list with the global registry: adds newly
-    /// registered rings, and gives each ring whose producer has exited one final
-    /// drain before dropping it. The registry lock is released before that
-    /// drain, so sink I/O never runs under the lock.
+    /// registered rings, updates re-registered (recycled) segments, drops
+    /// stale entries, and gives each ring whose producer has exited one final
+    /// drain before draining it from the pool. The registry lock is released
+    /// before that drain, so sink I/O never runs under the lock.
     fn sync_rings(&mut self, staging: &mut Vec<u8>, buf: &mut Vec<u8>) {
         let mut registry = REGISTRY
             .get()
@@ -356,56 +370,134 @@ impl Drain {
             .lock()
             .expect("invariant: ring registry mutex poisoned by a panic in another thread");
 
-        // Add rings not yet tracked locally. Arc::ptr_eq compares the
-        // allocation, avoiding a refcount bump for the membership check.
-        for ring in registry.iter() {
-            if !self.rings.iter().any(|r| Arc::ptr_eq(r, ring)) {
-                self.rings.push(Arc::clone(ring));
+        // Rings that stay alive for at least this sync cycle: registrations
+        // that are live, or reserved (a blocked producer formatting its own
+        // segment, or a producer whose Drop clears the reservation any moment).
+        #[cfg(not(feature = "fifo-backend"))]
+        let keep = |r: &Arc<RingBuffer>| r.live.load(Ordering::Acquire) || r.helper_reserved();
+        #[cfg(feature = "fifo-backend")]
+        let keep = |r: &Arc<RingBuffer>| r.live.load(Ordering::Acquire);
+
+        // Rings that are closing down now (dead and unreserved): drained and
+        // recycled outside the lock below. A reserved ring is never finalized
+        // here: its producer clears the reservation (ThreadBuf::drop), and the
+        // next sync gives it the final drain.
+        let mut finalize: Vec<Arc<RingBuffer>> = registry
+            .iter()
+            .filter(|r| !keep(r))
+            .map(Arc::clone)
+            .collect();
+        // A dead ring that was never added to the local list (its producer
+        // registered and exited between two syncs) is not in `registry`'s
+        // retain set below and can only be drained here, sourced from the
+        // registry itself; entries in `self.rings` that are dead AND still in
+        // the registry were just added above, so nothing is double-drained.
+        for (ring, _) in &self.rings {
+            if !keep(ring) && !registry.iter().any(|r| Arc::ptr_eq(r, ring)) {
+                finalize.push(Arc::clone(ring));
             }
         }
 
-        // Drop dead rings from the shared registry. Acquire pairs with the
+        // Reconcile local entries in place: keep the position for rings that
+        // are still registered, refresh the serial of re-registered
+        // incarnations, and drop the rest (stale or finalized).
+        let mut i = 0;
+        while i < self.rings.len() {
+            let (ring, _serial) = &self.rings[i];
+            let in_registry = registry.iter().any(|r| Arc::ptr_eq(r, ring));
+            if in_registry && keep(ring) {
+                // Refresh the incarnation, keeping the entry's position.
+                #[cfg(not(feature = "fifo-backend"))]
+                if let Some(r) = registry.iter().find(|r| Arc::ptr_eq(r, ring)) {
+                    let live_serial = r.serial();
+                    if live_serial != *_serial {
+                        self.rings[i] = (Arc::clone(r), live_serial);
+                    }
+                }
+                i += 1;
+            } else {
+                self.rings.swap_remove(i);
+            }
+        }
+
+        // Add newly registered rings at the tail, in registry order.
+        for ring in registry.iter() {
+            if keep(ring) && !self.rings.iter().any(|(r, _)| Arc::ptr_eq(r, ring)) {
+                #[cfg(not(feature = "fifo-backend"))]
+                self.rings.push((Arc::clone(ring), ring.serial()));
+                #[cfg(feature = "fifo-backend")]
+                self.rings.push((Arc::clone(ring), 0));
+            }
+        }
+
+        // Forget dead rings from the shared registry. Acquire pairs with the
         // producer's Release store of `live`.
-        registry.retain(|r| r.live.load(Ordering::Acquire));
+        registry.retain(&keep);
         // Release the lock before the final drain: it performs sink I/O, which
         // must never run under the registry mutex.
         drop(registry);
 
-        // Give each dead ring one last drain before dropping it locally. A
-        // single liveness check per ring decides both drain and removal, so a
-        // ring cannot slip from "kept" to "dropped" between the two. Once
-        // `live == false` is observed (Acquire, pairing with the producer's
-        // Release store), the producer is gone and its head is final, so this
-        // drain captures every record it published before exiting. That is the
-        // guarantee the live flag exists to provide.
-        let mut i = 0;
-        while i < self.rings.len() {
-            if self.rings[i].live.load(Ordering::Acquire) {
-                i += 1;
-            } else {
-                let ring = self.rings.swap_remove(i);
-                staging.clear();
-                drain_ring(
-                    &ring,
-                    staging,
-                    self.sink.as_mut(),
-                    self.timezone_offset,
-                    &self.calibration,
-                    &self.line_pattern,
-                    buf,
-                );
+        // Give each dead ring one last drain before dropping it locally or
+        // returning it to the pool. A single liveness check per ring decided
+        // both drain and removal, so a ring cannot slip from "kept" to
+        // "dropped" between the two. Once `live == false` is observed
+        // (Acquire, pairing with the producer's Release store), the producer
+        // is gone and its head is final, so this drain captures every record it
+        // published before exiting. That is the guarantee the live flag exists
+        // to provide.
+        for ring in finalize {
+            staging.clear();
+            drain_ring(
+                &ring,
+                staging,
+                self.sink.as_mut(),
+                self.timezone_offset,
+                &self.calibration,
+                &self.line_pattern,
+                buf,
+            );
+            #[cfg(not(feature = "fifo-backend"))]
+            if crate::segments::Segments::installed() {
+                crate::segments::Segments::get().drain_recycle(ring);
             }
         }
     }
 
     /// Drains every ring once, emitting all records published since the last
-    /// pass. Returns `true` if any record was processed.
+    /// pass, and flushes the producer-helper line queue (segmented policies).
+    /// Returns `true` if any record was processed.
     fn poll_once(&mut self, staging: &mut Vec<u8>, buf: &mut Vec<u8>) -> bool {
         let mut had_work = false;
-        for ring in &self.rings {
+        let mut i = 0;
+        while i < self.rings.len() {
+            let (ring, _serial) = {
+                let (r, s) = &self.rings[i];
+                (Arc::clone(r), *s)
+            };
+
+            #[cfg(not(feature = "fifo-backend"))]
+            {
+                if ring.serial() != _serial {
+                    // Reincarnated or stale: the next sync reconciles the entry.
+                    i += 1;
+                    continue;
+                }
+
+                if ring.helper_reserved() {
+                    // A pool-exhausted producer is formatting this segment itself
+                    // and will deliver the lines through the shared queue: skip it
+                    // en route to the segments that need the drain's help. The
+                    // reservation clears when the producer finishes (progress is
+                    // guaranteed: formatting one segment frees exactly the spare it
+                    // needs), so the entry is never skipped forever.
+                    i += 1;
+                    continue;
+                }
+            }
+
             staging.clear();
             if drain_ring(
-                ring,
+                &ring,
                 staging,
                 self.sink.as_mut(),
                 self.timezone_offset,
@@ -415,8 +507,82 @@ impl Drain {
             ) {
                 had_work = true;
             }
+
+            // A handed-off, fully drained segment is retired: unregistered
+            // from the global registry and (for the bounded pool) returned as
+            // a spare. Handed-off Quill segments are unregistered so their
+            // control objects don't accumulate; the arena bytes are unbounded
+            // by design.
+            #[cfg(not(feature = "fifo-backend"))]
+            if self.maybe_retire(i, &ring, _serial) {
+                // Entry was swapped out; re-examine the entry now at `i`.
+            } else {
+                i += 1;
+            }
+            #[cfg(feature = "fifo-backend")]
+            {
+                i += 1;
+            }
         }
+
+        // Segmented helpers produced formatted lines for the drain to write:
+        // the sink stays a single writer. This flush happens once per pass,
+        // after every ring, so line order from a single helper is preserved.
+        #[cfg(not(feature = "fifo-backend"))]
+        if self.segmented && crate::segments::Segments::installed() {
+            let collected = crate::segments::Segments::get().take_lines();
+            for (line, level) in collected {
+                if let Err(e) = self.sink.accept(&line, level) {
+                    eprintln!("ticklog: sink accept failed: {}", e);
+                }
+                had_work = true;
+            }
+        }
+
         had_work
+    }
+
+    /// Retires a handed-off segment whose records the drain just consumed:
+    /// unregisters it (so a recycled pool segment is re-registered at the
+    /// tail on its next use, keeping per-thread order), and returns it to the
+    /// bounded pool if it is pool-backed. Returns `true` if the drain's local
+    /// entry was removed (callers must not advance past the vacated slot).
+    #[cfg(not(feature = "fifo-backend"))]
+    fn maybe_retire(&mut self, idx: usize, ring: &Arc<RingBuffer>, entry_serial: u64) -> bool {
+        if !ring.handed_off() || ring.helper_reserved() || ring.serial() != entry_serial {
+            return false;
+        }
+        // Only fully drained segments are retired; otherwise let the next
+        // pass consume the remainder.
+        if ring.head().load(Ordering::Acquire) != ring.tail().load(Ordering::Acquire) {
+            return false;
+        }
+
+        let mut registry = REGISTRY
+            .get()
+            .expect("invariant: ring registry must be initialized")
+            .lock()
+            .expect("invariant: ring registry mutex poisoned by a panic in another thread");
+        // Re-verify the incarnation under the lock: a producer may have
+        // re-registered (serial changed) between the check above and now.
+        if ring.serial() != entry_serial {
+            return false;
+        }
+        let present = registry.iter().any(|r| Arc::ptr_eq(r, ring));
+        if !present {
+            // Already retired (e.g. the producer's helper formatted, recycled
+            // and unregistered it itself): nothing to do.
+            return false;
+        }
+        registry.retain(|r| !Arc::ptr_eq(r, ring));
+        drop(registry);
+
+        self.rings.swap_remove(idx);
+        #[cfg(not(feature = "fifo-backend"))]
+        if crate::segments::Segments::installed() {
+            crate::segments::Segments::get().drain_recycle(Arc::clone(ring));
+        }
+        true
     }
 }
 
@@ -428,11 +594,80 @@ impl Drain {
 /// run both from the poll loop (over live rings) and from `sync_rings` (a final
 /// drain of a dead ring before it is dropped). `staging` is unused: the custom
 /// ring stores slot-aligned records in its own memory.
+///
+/// Sets the ring's `draining` flag for its duration: a pool-exhausted producer
+/// waiting to format this same segment as a helper spins on that flag, so the
+/// drain's read never races another formatter.
 #[cfg(not(feature = "fifo-backend"))]
 fn drain_ring(
     ring: &RingBuffer,
     _staging: &mut Vec<u8>,
     sink: &mut dyn LogSink,
+    timezone_offset: i32,
+    calibration: &Calibration,
+    line_pattern: &Template,
+    buf: &mut Vec<u8>,
+) -> bool {
+    ring.mark_draining();
+    let had_work = drain_ring_inner(
+        ring,
+        Some(sink),
+        None,
+        timezone_offset,
+        calibration,
+        line_pattern,
+        buf,
+    );
+    ring.clear_draining();
+    had_work
+}
+
+/// Formats every record in `[tail, head)` of a handed-off segment into owned
+/// lines, without advancing the tail (the drain does that, and only for rings
+/// it drains itself) and without consulting any sink. Used by the segmented
+/// helper path, where a pool-exhausted producer formats its own full segment
+/// to keep the blocking time bounded.
+///
+/// The producer must have stopped appending to `ring` (handed off). It first
+/// waits for the drain to clear `draining`: the drain may be mid-drain on this
+/// very segment, and the two formatters must not both read the same range as
+/// their own delivery.
+#[cfg(not(feature = "fifo-backend"))]
+pub(crate) fn format_segment(
+    ring: &RingBuffer,
+    timezone_offset: i32,
+    calibration: &Calibration,
+    line_pattern: &Template,
+) -> Vec<(Vec<u8>, Level)> {
+    while ring.draining() {
+        std::hint::spin_loop();
+        std::thread::yield_now();
+    }
+    let mut lines: Vec<(Vec<u8>, Level)> = Vec::new();
+    let mut buf = Vec::new();
+    drain_ring_inner(
+        ring,
+        None,
+        Some(&mut lines),
+        timezone_offset,
+        calibration,
+        line_pattern,
+        &mut buf,
+    );
+    lines
+}
+
+/// Shared record-decoding core for the drain thread and the producer-side
+/// helper. Formats every record in `[tail, head)` of a custom ring, dispatching
+/// each formatted line either to `sink` or, when formatting on the producer
+/// side, into `lines` as an owned buffer. Publishes the advanced tail in all
+/// cases: the tail defines what the drain has consumed, and the helper
+/// precedes its recycle of the segment with this same store.
+#[cfg(not(feature = "fifo-backend"))]
+fn drain_ring_inner(
+    ring: &RingBuffer,
+    mut sink: Option<&mut dyn LogSink>,
+    mut lines: Option<&mut Vec<(Vec<u8>, Level)>>,
     timezone_offset: i32,
     calibration: &Calibration,
     line_pattern: &Template,
@@ -460,6 +695,8 @@ fn drain_ring(
     // write. It reads only [tail, head_cache), a region the producer published
     // via its Release store of `head` and will not overwrite while tail lags.
     let base = ring.data_ptr() as *const u8;
+
+    let mut had_work = false;
 
     while tail < head_cache {
         let offset = (tail & mask) as usize;
@@ -510,9 +747,23 @@ fn drain_ring(
 
         buf.clear();
         decode_and_format(record, timezone_offset, calibration, line_pattern, buf);
-        if let Err(e) = sink.accept(buf, level) {
-            eprintln!("ticklog: sink accept failed: {}", e);
+        match sink.as_mut() {
+            Some(s) => {
+                if let Err(e) = s.accept(buf, level) {
+                    eprintln!("ticklog: sink accept failed: {}", e);
+                }
+            }
+            None => {
+                // SAFETY: `lines` is always Some when `sink` is None (the only
+                // caller is format_segment, which supplies both). Moving the
+                // line out keeps the caller's staging buffer reusable.
+                lines
+                    .as_mut()
+                    .expect("invariant: lines required when formatting without a sink")
+                    .push((std::mem::take(buf), level));
+            }
         }
+        had_work = true;
 
         tail += align_up(total_size, SLOT_SIZE as u64);
     }
@@ -526,7 +777,7 @@ fn drain_ring(
         *ring.head_cache() = head_cache;
     }
 
-    true
+    had_work
 }
 
 /// Drains one FIFO-backend ring: pops every byte currently buffered into
@@ -871,7 +1122,7 @@ fn write_unknown_tag(tag: u8, buf: &mut Vec<u8>) {
     buf.push(b'>');
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "fifo-backend")))]
 mod tests {
     use super::*;
     use crate::builder::DEFAULT_LINE_PATTERN;
@@ -1014,6 +1265,7 @@ mod tests {
             Arc::new(AtomicBool::new(false)),
             identity_calibration(),
             default_line_pattern(),
+            false,
         );
         (drain, calls)
     }
@@ -1023,8 +1275,7 @@ mod tests {
     #[cfg(not(feature = "fifo-backend"))]
     fn place_record(ring: &RingBuffer, offset: u64, bytes: &[u8]) {
         // SAFETY: single-threaded test with exclusive access to the ring data.
-        let data =
-            unsafe { std::slice::from_raw_parts_mut(ring.data_ptr(), ring.capacity()) };
+        let data = unsafe { std::slice::from_raw_parts_mut(ring.data_ptr(), ring.capacity()) };
         let start = offset as usize;
         data[start..start + bytes.len()].copy_from_slice(bytes);
         let new_head = offset + align_up(bytes.len() as u64, SLOT_SIZE as u64);
@@ -1280,7 +1531,7 @@ mod tests {
     #[test]
     fn poll_empty_ring_no_accepts() {
         let (mut drain, calls) = capture_drain();
-        drain.rings.push(Arc::new(RingBuffer::new()));
+        drain.rings.push((Arc::new(RingBuffer::new()), 0));
         let mut staging = Vec::new();
         let mut buf = Vec::new();
         assert!(!drain.poll_once(&mut staging, &mut buf));
@@ -1303,7 +1554,7 @@ mod tests {
         );
         place_record(&ring, 0, &record);
         let head = ring.head().load(Ordering::Acquire);
-        drain.rings.push(Arc::clone(&ring));
+        drain.rings.push((Arc::clone(&ring), ring.serial()));
 
         let mut staging = Vec::new();
         let mut buf = Vec::new();
@@ -1342,7 +1593,7 @@ mod tests {
         let r2 = build_record(Level::Info, 0, "second", None, 1, None, &[]);
         place_record(&ring, off3, &r2);
 
-        drain.rings.push(Arc::clone(&ring));
+        drain.rings.push((Arc::clone(&ring), ring.serial()));
         let mut staging = Vec::new();
         let mut buf = Vec::new();
         drain.poll_once(&mut staging, &mut buf);
@@ -1372,7 +1623,7 @@ mod tests {
         let record = build_record(Level::Info, 0, "hi", Some(("", 0)), 1, None, &[]);
         place_record(&ring, SLOT_SIZE as u64, &record);
 
-        drain.rings.push(Arc::clone(&ring));
+        drain.rings.push((Arc::clone(&ring), ring.serial()));
         let mut staging = Vec::new();
         let mut buf = Vec::new();
         assert!(drain.poll_once(&mut staging, &mut buf));
@@ -1394,14 +1645,13 @@ mod tests {
         // Place two records in consecutive slots and set head past both.
         {
             // SAFETY: single-threaded test with exclusive access.
-            let data =
-                unsafe { std::slice::from_raw_parts_mut(ring.data_ptr(), ring.capacity()) };
+            let data = unsafe { std::slice::from_raw_parts_mut(ring.data_ptr(), ring.capacity()) };
             data[..r1.len()].copy_from_slice(&r1);
             let off2 = slot as usize;
             data[off2..off2 + r2.len()].copy_from_slice(&r2);
         }
         ring.head().store(2 * slot, Ordering::Release);
-        drain.rings.push(Arc::clone(&ring));
+        drain.rings.push((Arc::clone(&ring), ring.serial()));
 
         let mut staging = Vec::new();
         let mut buf = Vec::new();
@@ -1437,12 +1687,12 @@ mod tests {
         let mut staging = Vec::new();
         let mut buf = Vec::new();
         drain.sync_rings(&mut staging, &mut buf);
-        assert!(drain.rings.iter().any(|r| Arc::ptr_eq(r, &ring)));
+        assert!(drain.rings.iter().any(|(r, _)| Arc::ptr_eq(r, &ring)));
 
         // Mark the ring dead; the next sync must drop it.
         ring.live.store(false, Ordering::Release);
         drain.sync_rings(&mut staging, &mut buf);
-        assert!(!drain.rings.iter().any(|r| Arc::ptr_eq(r, &ring)));
+        assert!(!drain.rings.iter().any(|(r, _)| Arc::ptr_eq(r, &ring)));
     }
 
     #[test]
@@ -1461,7 +1711,11 @@ mod tests {
         let mut buf = Vec::new();
         drain.sync_rings(&mut staging, &mut buf);
         drain.sync_rings(&mut staging, &mut buf);
-        let count = drain.rings.iter().filter(|r| Arc::ptr_eq(r, &ring)).count();
+        let count = drain
+            .rings
+            .iter()
+            .filter(|(r, _)| Arc::ptr_eq(r, &ring))
+            .count();
         assert_eq!(count, 1);
         // Clean up so a dead ring is not left in the shared registry.
         ring.live.store(false, Ordering::Release);
@@ -1482,7 +1736,7 @@ mod tests {
         let record = build_record(Level::Info, 0, "bye", Some(("", 0)), 1, None, &[]);
         place_record(&ring, 0, &record);
         ring.live.store(false, Ordering::Release);
-        drain.rings.push(Arc::clone(&ring));
+        drain.rings.push((Arc::clone(&ring), ring.serial()));
 
         let mut staging = Vec::new();
         let mut buf = Vec::new();
@@ -1494,7 +1748,7 @@ mod tests {
         assert_eq!(recorded[0].0, "1970-01-01T00:00:00.000000000Z INFO :0 bye",);
         drop(recorded);
         // And the ring is gone from the drain's local list afterwards.
-        assert!(!drain.rings.iter().any(|r| Arc::ptr_eq(r, &ring)));
+        assert!(!drain.rings.iter().any(|(r, _)| Arc::ptr_eq(r, &ring)));
     }
 
     // ---- Concurrent producer/drain (aliasing model) -------------------------
@@ -1605,7 +1859,7 @@ mod tests {
             None,
             &[le_bytes(TAG_U64, 42)],
         );
-        drain.rings.push(Arc::clone(&ring));
+        drain.rings.push((Arc::clone(&ring), ring.serial()));
         push_record(&ring, &record);
 
         let mut staging = Vec::new();
@@ -1633,7 +1887,7 @@ mod tests {
         // committed back-to-back must both be emitted in a single pump.
         let (mut drain, calls) = capture_drain();
         let ring = Arc::new(RingBuffer::new());
-        drain.rings.push(Arc::clone(&ring));
+        drain.rings.push((Arc::clone(&ring), ring.serial()));
 
         let r1 = build_record(Level::Info, 0, "one", Some(("", 0)), 1, None, &[]);
         let r2 = build_record(Level::Warn, 0, "two", Some(("", 0)), 1, None, &[]);
@@ -1664,7 +1918,7 @@ mod tests {
     fn triple_buffer_drain_delivers_latest_record_only() {
         let (mut drain, calls) = capture_drain();
         let ring = Arc::new(RingBuffer::new());
-        drain.rings.push(Arc::clone(&ring));
+        drain.rings.push((Arc::clone(&ring), ring.serial()));
 
         let r1 = build_record(Level::Info, 0, "one", Some(("", 0)), 1, None, &[]);
         let r2 = build_record(Level::Warn, 0, "two", Some(("", 0)), 1, None, &[]);
