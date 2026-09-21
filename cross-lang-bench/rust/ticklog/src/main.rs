@@ -330,6 +330,9 @@ struct Config {
     backend_core: Option<usize>,
     /// Per-thread ring buffer capacity in bytes (power of two).
     ring_capacity: usize,
+    /// rtrb backend: number of records staged per chunk. `None` leaves the
+    /// TSD-resident default (DEFAULT_CHUNK_SIZE) in place.
+    chunk_size: Option<usize>,
     /// Batch-average samples per (workload, thread_count) config.
     samples: usize,
     /// Path of a sink file. When set, ticklog writes formatted lines to this
@@ -366,6 +369,7 @@ fn parse_args() -> Config {
     let mut producer_core = None;
     let mut backend_core = None;
     let mut ring_capacity = None;
+    let mut chunk_size = None;
     let mut sink_file = None;
     let mut samples = None;
     let mut candidate_override = None;
@@ -422,8 +426,16 @@ fn parse_args() -> Config {
                     eprintln!("error: --ring-capacity requires a value");
                     process::exit(1);
                 }
-                ring_capacity = Some(parse_usize(&args[i], "--ring-capacity"));
-            }
+        ring_capacity = Some(parse_usize(&args[i], "--ring-capacity"));
+    }
+    "--chunk-size" => {
+        i += 1;
+        if i >= args.len() {
+            eprintln!("error: --chunk-size requires a value");
+            process::exit(1);
+        }
+        chunk_size = Some(parse_usize(&args[i], "--chunk-size"));
+    }
             "--sink-file" => {
                 i += 1;
                 if i >= args.len() {
@@ -471,6 +483,7 @@ fn parse_args() -> Config {
         producer_core,
         backend_core,
         ring_capacity: ring_capacity.unwrap_or(ticklog::__private::DEFAULT_RING_SIZE),
+        chunk_size,
         samples: samples.unwrap_or(SAMPLES),
         candidate_name: candidate_override.unwrap_or_else(|| {
             if sink_file.is_some() {
@@ -526,6 +539,18 @@ fn main() {
     // policy. `info!` uses the crate-root bridge macros above, which resolve
     // to the same value.
     let backpressure = policy();
+
+    // rtrb backend: stage DEFAULT_CHUNK_SIZE records per chunk. Must be stored
+    // BEFORE __configure_rt, which builds the ring (reading DEFAULT_CHUNK_SIZE
+    // at construction) inside the runtime.
+    #[cfg(feature = "backend-rtrb")]
+    if let Some(n) = cfg.chunk_size {
+        ticklog::__private::DEFAULT_CHUNK_SIZE.store(
+            n.max(1),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+
     let guard = ticklog::__private::__configure_rt(
         Box::new(sink),
         0i32,

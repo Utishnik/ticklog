@@ -13,7 +13,17 @@ use std::thread;
 
 use ticklog::{Backpressure, Level, LogSink, info};
 
+/// The real run uses 8 threads x 1_000 records. Miri interprets every byte of
+/// every record, so it still exercises 8 concurrent rings but with a volume
+/// that finishes in seconds rather than burning the whole test budget (the
+/// drain per-thread-order property is volume-independent).
+#[cfg(miri)]
 const THREADS: usize = 8;
+#[cfg(miri)]
+const RECORDS_PER_THREAD: usize = 100;
+#[cfg(not(miri))]
+const THREADS: usize = 8;
+#[cfg(not(miri))]
 const RECORDS_PER_THREAD: usize = 1_000;
 
 /// Records every accepted line for post-shutdown assertions.
