@@ -1,0 +1,24 @@
+[package]
+name = "ticklog-gungraun-harness"
+version = "0.1.0"
+edition = "2021"
+publish = false
+rust-version = "1.85"
+
+[dependencies]
+ticklog = { path = "../../.." }
+gungraun = "0.19.4"
+
+[features]
+# The gungraun harness version always benchmarks the custom-ring under the
+# crate's Drop policy, so it mirrors the "policy-drop" feature of the classic
+# parallel harness without toggling anything.
+policy-drop = []
+
+[[bench]]
+name = "ticklog_ring"
+harness = false
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
