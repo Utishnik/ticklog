@@ -174,6 +174,8 @@ mod ring;
 mod ringbuf_backend;
 #[cfg(feature = "backend-ringbuffer")]
 mod ringbuffer_backend;
+#[cfg(feature = "backend-rtrb")]
+mod rtrb_backend;
 #[cfg(not(feature = "fifo-backend"))]
 mod segments;
 mod sink;
@@ -203,4 +205,6 @@ pub mod __private {
     pub use crate::macros::dispatch;
     pub use crate::record::BASE_RECORD_SIZE;
     pub use crate::ring::DEFAULT_RING_SIZE;
+    #[cfg(feature = "backend-rtrb")]
+    pub use crate::rtrb_backend::DEFAULT_CHUNK_SIZE;
 }

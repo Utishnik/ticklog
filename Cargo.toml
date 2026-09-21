@@ -1,4 +1,4 @@
-[package]
+﻿[package]
 authors = ["Tensorbinge <tensorbinge@gmail.com>"]
 categories = ["development-tools::debugging"]
 description = "A fast, minimal logging library for Rust, designed for performance-critical applications, e.g. high-frequency trading."
@@ -16,6 +16,7 @@ crossbeam-utils = "0.8"
 r3 = { git = "https://github.com/Utishnik/mytestrs" }
 ringbuffer = { version = "0.16", optional = true }
 ringbuf = { version = "0.5", optional = true }
+rtrb = { version = "0.4", optional = true }
 spin = { version = "0.12.3", features = ["std"] }
 triple_buffer = { version = "9.0", optional = true }
 
@@ -33,6 +34,7 @@ r3 = { path = "vendor/r3" }
 default = []
 backend-ringbuffer = ["dep:ringbuffer", "fifo-backend"]
 backend-ringbuf = ["dep:ringbuf", "fifo-backend"]
+backend-rtrb = ["dep:rtrb", "fifo-backend"]
 backend-triple-buffer = ["dep:triple_buffer", "fifo-backend"]
 fifo-backend = []
 

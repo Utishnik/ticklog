@@ -1053,6 +1053,13 @@ pub(crate) use crate::ringbuf_backend::RingBuffer;
 #[cfg(feature = "backend-ringbuffer")]
 pub(crate) use crate::ringbuffer_backend::RingBuffer;
 #[cfg(all(
+    feature = "backend-rtrb",
+    not(feature = "backend-ringbuffer"),
+    not(feature = "backend-ringbuf"),
+    not(feature = "backend-triple-buffer")
+))]
+pub(crate) use crate::rtrb_backend::RingBuffer;
+#[cfg(all(
     feature = "backend-triple-buffer",
     not(feature = "backend-ringbuffer"),
     not(feature = "backend-ringbuf")
