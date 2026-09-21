@@ -18,6 +18,9 @@ backend-rtrb = ["ticklog/backend-rtrb"]
 backend-triple-buffer = ["ticklog/backend-triple-buffer"]
 # Selects the build-time Backpressure policy the logging code runs under.
 policy-block = []
+# Drop: the producer never blocks; if the FIFO is full the record is discarded
+# and `info!` returns immediately (ticklog's default, crate-side Drop policy).
+policy-drop = []
 policy-nanolog = []
 policy-quill = []
 # Per-thread-ring fast path: quill-style cached reader position (the producer

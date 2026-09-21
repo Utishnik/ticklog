@@ -37,6 +37,8 @@ fn policy() -> Backpressure {
         Backpressure::Quill
     } else if cfg!(feature = "policy-nanolog") {
         Backpressure::NanoLog
+    } else if cfg!(feature = "policy-drop") {
+        Backpressure::Drop
     } else {
         Backpressure::Block
     }
@@ -56,11 +58,13 @@ macro_rules! __ticklog_backpressure {
             ticklog::Backpressure::Quill
         } else if cfg!(feature = "policy-quill") {
             ticklog::Backpressure::Quill
-        } else if cfg!(feature = "policy-nanolog") {
-            ticklog::Backpressure::NanoLog
-        } else {
-            ticklog::Backpressure::Block
-        }
+    } else if cfg!(feature = "policy-nanolog") {
+        Backpressure::NanoLog
+    } else if cfg!(feature = "policy-drop") {
+        Backpressure::Drop
+    } else {
+        Backpressure::Block
+    }
     };
 }
 #[allow(non_local_definitions)]
