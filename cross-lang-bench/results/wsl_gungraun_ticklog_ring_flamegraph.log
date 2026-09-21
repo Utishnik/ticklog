@@ -1,0 +1,73 @@
+### gungraun flamegraph run (cache-miss event kinds only)
+### feature=flamegraph  run date: 2026-09-21T21:09:00Z  host: DESKTOP-4BHCLBP  os: linux (WSL2)
+### gungraun=0.19.4  gungraun-runner=0.19.4  valgrind=valgrind-3.26.0
+### tool: Callgrind  event_kinds=[D1mr D1mw DLmr DLmw]  kind=Regular  BATCH=1000  policy=Drop
+
+warning: constant `SOURCE_SECTION_SIZE` is never used
+  --> /mnt/c/Users/Admin/Desktop/ticklog/src/record.rs:49:18
+   |
+49 | pub(crate) const SOURCE_SECTION_SIZE: usize = size_of::<u64>()  // file_ptr
+   |                  ^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `THREAD_SECTION_BASE_SIZE` is never used
+  --> /mnt/c/Users/Admin/Desktop/ticklog/src/record.rs:56:18
+   |
+56 | pub(crate) const THREAD_SECTION_BASE_SIZE: usize = size_of::<u64>()  // thread_id
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `ticklog` (lib) generated 2 warnings
+   Compiling ticklog-gungraun-harness v0.1.0 (/mnt/c/Users/Admin/Desktop/ticklog/cross-lang-bench/rust/gungraun)
+    Finished `bench` profile [optimized] target(s) in 17.00s
+     Running benches/ticklog_ring.rs (target/release/deps/ticklog_ring-764badbe6553172e)
+ticklog_ring::ticklog_ring_group::bench_single_int seed_0:(setup_config(0u64))
+- end of stdout/stderr
+  Instructions:                       49029|N/A                  (*********)
+  L1 Hits:                            74039|N/A                  (*********)
+  LL Hits:                                2|N/A                  (*********)
+  RAM Hits:                            1007|N/A                  (*********)
+  Total read+write:                   75048|N/A                  (*********)
+  Estimated Cycles:                  109294|N/A                  (*********)
+ticklog_ring::ticklog_ring_group::bench_single_int seed_1:(setup_config(1u64))
+- end of stdout/stderr
+  Instructions:                       49029|49029                (No change)
+  L1 Hits:                            74039|74040                (-0.00135%) [-1.00001x]
+  LL Hits:                                2|2                    (No change)
+  RAM Hits:                            1007|1006                 (+0.09940%) [+1.00099x]
+  Total read+write:                   75048|75048                (No change)
+  Estimated Cycles:                  109294|109260               (+0.03112%) [+1.00031x]
+ticklog_ring::ticklog_ring_group::bench_mixed seed_0:(setup_config(0u64))
+- end of stdout/stderr
+  Instructions:                      120031|120031               (No change)
+  L1 Hits:                           170035|170037               (-0.00118%) [-1.00001x]
+  LL Hits:                                3|2                    (+50.0000%) [+1.50000x]
+  RAM Hits:                            1012|1011                 (+0.09891%) [+1.00099x]
+  Total read+write:                  171050|171050               (No change)
+  Estimated Cycles:                  205470|205432               (+0.01850%) [+1.00018x]
+ticklog_ring::ticklog_ring_group::bench_mixed seed_1:(setup_config(1u64))
+- end of stdout/stderr
+  Instructions:                      120031|120031               (No change)
+  L1 Hits:                           170035|170037               (-0.00118%) [-1.00001x]
+  LL Hits:                                3|2                    (+50.0000%) [+1.50000x]
+  RAM Hits:                            1012|1011                 (+0.09891%) [+1.00099x]
+  Total read+write:                  171050|171050               (No change)
+  Estimated Cycles:                  205470|205432               (+0.01850%) [+1.00018x]
+ticklog_ring::ticklog_ring_group::bench_string seed_0:(setup_config(0u64))
+- end of stdout/stderr
+  Instructions:                      102029|102029               (No change)
+  L1 Hits:                           142034|142036               (-0.00141%) [-1.00001x]
+  LL Hits:                                3|2                    (+50.0000%) [+1.50000x]
+  RAM Hits:                            1011|1010                 (+0.09901%) [+1.00099x]
+  Total read+write:                  143048|143048               (No change)
+  Estimated Cycles:                  177434|177396               (+0.02142%) [+1.00021x]
+ticklog_ring::ticklog_ring_group::bench_string seed_1:(setup_config(1u64))
+- end of stdout/stderr
+  Instructions:                      102029|102029               (No change)
+  L1 Hits:                           142034|142036               (-0.00141%) [-1.00001x]
+  LL Hits:                                3|2                    (+50.0000%) [+1.50000x]
+  RAM Hits:                            1011|1010                 (+0.09901%) [+1.00099x]
+  Total read+write:                  143048|143048               (No change)
+  Estimated Cycles:                  177434|177396               (+0.02142%) [+1.00021x]
+
+Gungraun result: Ok. 6 without regressions; 0 regressed; 0 filtered; 6 benchmarks finished in 4.78385s

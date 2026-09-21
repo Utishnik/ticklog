@@ -17,6 +17,8 @@ use std::sync::Once;
 
 extern crate gungraun;
 use gungraun::prelude::*;
+#[cfg(feature = "flamegraph")]
+use gungraun::{Callgrind, EventKind, FlamegraphConfig, FlamegraphKind};
 use ticklog::{info, Backpressure, Level, LogSink};
 
 /// Number of log calls per measured batch (matches the classic harness).
@@ -123,4 +125,29 @@ library_benchmark_group!(
     benchmarks = [bench_single_int, bench_mixed, bench_string]
 );
 
-main!(library_benchmark_groups = [ticklog_ring_group]);
+/// Build the top-level [`LibraryBenchmarkConfig`]. With the `flamegraph`
+/// feature enabled, Callgrind flamegraphs are generated for the *cache-miss*
+/// event kinds only (L1 data read/write misses), so every SVG stack frame is
+/// attributed to cache misses instead of plain instruction counts. Only
+/// regular flamegraphs are produced (no differential, which would need a
+/// baseline). LL miss event kinds are skipped: with ~2 LL misses per batch
+/// the inferred flamegraph has no stack counts.
+fn build_config() -> LibraryBenchmarkConfig {
+    let mut config = LibraryBenchmarkConfig::default();
+    #[cfg(feature = "flamegraph")]
+    {
+        config.tool(
+            Callgrind::default().flamegraph(
+                FlamegraphConfig::default()
+                    .kind(FlamegraphKind::Regular)
+                    .event_kinds([EventKind::D1mr, EventKind::D1mw]),
+            ),
+        );
+    }
+    config
+}
+
+main!(
+    config = build_config(),
+    library_benchmark_groups = [ticklog_ring_group]
+);

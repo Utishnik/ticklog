@@ -15,6 +15,15 @@ gungraun = "0.19.4"
 # parallel harness without toggling anything.
 policy-drop = []
 
+# Enable Callgrind flamegraph generation for the ticklog_ring group. The
+# flamegraphs are built for the L1 cache-miss EventKinds (D1 read+write
+# misses) only, so each SVG stack is attributed to cache misses, not bare
+# instruction counts. Callgrind already simulates the cache by default
+# (--cache-sim=yes), so no extra tool args are needed.
+#
+#     GUNGRAUN_NOCAPTURE=true cargo bench --features flamegraph
+flamegraph = []
+
 [[bench]]
 name = "ticklog_ring"
 harness = false
