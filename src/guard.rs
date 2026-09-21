@@ -88,9 +88,12 @@ mod tests {
         let shutdown = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&shutdown);
         let handle = thread::spawn(move || {
-            // Busy-wait until shutdown is signaled, then exit.
+            // Busy-wait until shutdown is signaled, then exit. The yield is a
+            // real scheduling point so Miri's round-robin scheduler can run the
+            // thread that sets the flag.
             while !flag.load(Ordering::Acquire) {
                 std::hint::spin_loop();
+                std::thread::yield_now();
             }
         });
 
@@ -110,6 +113,7 @@ mod tests {
         let handle = thread::spawn(move || {
             while !flag.load(Ordering::Acquire) {
                 std::hint::spin_loop();
+                std::thread::yield_now();
             }
             done.store(true, Ordering::Release);
         });

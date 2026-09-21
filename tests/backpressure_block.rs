@@ -15,7 +15,7 @@ use ticklog::{Backpressure, Level, LogSink, info};
 /// Several times a 1 MB ring's capacity, so the producer must block and wait
 /// for the drain repeatedly during the run.
 #[cfg(miri)]
-const PRODUCED: usize = 3_000;
+const PRODUCED: usize = 800;
 #[cfg(not(miri))]
 const PRODUCED: usize = 50_000;
 

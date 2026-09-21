@@ -338,6 +338,10 @@ impl Drain {
             // Idle: back off with a capped, doubling spin. No clock, no lock.
             for _ in 0..spin {
                 std::hint::spin_loop();
+                // Yield every iteration so Miri's round-robin scheduler (and
+                // producers waiting on a full ring) stay runnable while the
+                // drain is parked.
+                std::thread::yield_now();
             }
             spin = (spin << 1).min(SPIN_CAP); // no overflow: capped
         }
