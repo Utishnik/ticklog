@@ -13,6 +13,11 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # `.cargo/config.toml` sets target-cpu=native. rust-cache can restore
+  # proc-macros/artifacts built for a different runner CPU, which makes
+  # rustc die with SIGILL (seen on `r3` via hotpath_macros). Empty RUSTFLAGS
+  # overrides the config for every CI job; local builds keep native.
+  RUSTFLAGS: ""
 
 jobs:
   # Build + test across all OS targets
@@ -94,7 +99,10 @@ jobs:
           cargo +nightly miri test --lib producer_and_drain
           cargo +nightly miri test --lib thread_buf
         env:
-          MIRIFLAGS: -Zmiri-tree-borrows
+          # tree-borrows: the aliasing model under test.
+          # ignore-leaks: drain tests intentionally Box::leak tiny Site
+          # descriptors (stand-in for constant promotion).
+          MIRIFLAGS: -Zmiri-tree-borrows -Zmiri-ignore-leaks
 
   # Doc build check
   docs:

@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 authors = ["Tensorbinge <tensorbinge@gmail.com>"]
 categories = ["development-tools::debugging"]
 description = "A fast, minimal logging library for Rust, designed for performance-critical applications, e.g. high-frequency trading."

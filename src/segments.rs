@@ -11,8 +11,8 @@
 //! - **NanoLog** keeps a *bounded* pool of preallocated segments. When the
 //!   whole pool is exhausted the producer blocks — but instead of spinning
 //!   idly it does the drain's decoding/formatting work on its own
-//!   handed-off segments (`[`Segments::format_helper_segment`]`), feeding
-//!   the shared [`lines`] queue that the drain writes to the sink. Each
+//!   handed-off segments (`Segments::format_helper_segment`), feeding
+//!   the shared `lines` queue that the drain writes to the sink. Each
 //!   formatted segment is recycled back into the pool, so one unit of work
 //!   frees exactly the spare the producer needs. Memory is bounded by the
 //!   pool; records are never dropped, only delayed.

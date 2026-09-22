@@ -630,7 +630,7 @@ mod custom {
         /// visible before the drain sees the new head and reads the region.
         ///
         /// Under the `watermark-head` feature the drain-facing store happens
-        /// once per [`WATERMARK_HEAD_RECORDS`] publishes; every call still
+        /// once per `WATERMARK_HEAD_RECORDS` publishes; every call still
         /// records the true position producer-privately.
         #[inline(always)]
         pub(crate) fn publish(&self, r: Reservation) {

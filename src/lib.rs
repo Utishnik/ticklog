@@ -111,8 +111,8 @@
 //! - `backend-triple-buffer`: a **lossy latest-value exchange** built on the
 //!   `triple_buffer` crate — published-only-only semantics, benchmark-only.
 //!
-//! The `ring_capacity` key works the same for every backend; see
-//! [`crate::ring`] for the trade-offs.
+//! The `ring_capacity` key works the same for every backend; see the
+//! crate ring module for the trade-offs.
 //!
 //! # Sinks
 //!
