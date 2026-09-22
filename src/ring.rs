@@ -803,9 +803,12 @@ mod custom {
 
         #[test]
         fn with_capacity_accepts_power_of_two() {
-            let rb = RingBuffer::with_capacity(64);
-            assert_eq!(rb.capacity(), 64);
-            assert_eq!(rb.mask(), 63);
+            // SLOT_SIZE is 64 on most targets and 128 on Apple Silicon
+            // (P-core cache line); the smallest legal ring is one slot.
+            let cap = SLOT_SIZE;
+            let rb = RingBuffer::with_capacity(cap);
+            assert_eq!(rb.capacity(), cap);
+            assert_eq!(rb.mask(), (cap - 1) as u64);
         }
 
         #[test]
