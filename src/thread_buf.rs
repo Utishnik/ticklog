@@ -4,9 +4,6 @@
 //! [`UnsafeCell`] slot. The global [`REGISTRY`] tracks all active rings.
 
 use std::cell::{Cell, UnsafeCell};
-#[cfg(not(feature = "fifo-backend"))]
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 
@@ -15,6 +12,7 @@ use crate::error::TicklogError;
 #[cfg(not(feature = "fifo-backend"))]
 use crate::ring::Reservation;
 use crate::ring::{DEFAULT_RING_SIZE, RingBuffer};
+use crate::sync::Ordering;
 
 /// A thread's local ring buffer and cached metadata.
 ///
@@ -75,8 +73,11 @@ pub(crate) static BACKPRESSURE: OnceLock<Backpressure> = OnceLock::new();
 /// Monotonic registration counter for ring `serial`s. Each registration of a
 /// ring object (including re-registration of a recycled pool segment) stamps a
 /// fresh serial, which lets the drain distinguish a segment's incarnations.
+///
+/// Always a plain `std` atomic: serial assignment is not part of the lock-free
+/// protocols under loom, and loom's `AtomicU64::new` is not const.
 #[cfg(not(feature = "fifo-backend"))]
-static NEXT_SERIAL: AtomicU64 = AtomicU64::new(0);
+static NEXT_SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Extracts a stable `u64` identifier from [`std::thread::ThreadId`] by
 /// parsing its `Debug` representation.

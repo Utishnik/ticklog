@@ -167,6 +167,8 @@ mod error;
 mod format;
 mod guard;
 mod level;
+#[cfg(all(test, ticklog_loom))]
+mod loom_tests;
 mod macros;
 mod record;
 mod ring;
@@ -179,6 +181,7 @@ mod rtrb_backend;
 #[cfg(not(feature = "fifo-backend"))]
 mod segments;
 mod sink;
+mod sync;
 mod thread_buf;
 mod timestamp;
 #[cfg(feature = "backend-triple-buffer")]

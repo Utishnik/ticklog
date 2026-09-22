@@ -7,7 +7,6 @@ keywords = ["logging", "low-latency", "performance"]
 license = "MIT OR Apache-2.0"
 name = "ticklog"
 repository = "https://github.com/tensorbinge/ticklog"
-rust-version = "1.85"
 version = "0.1.2"
 
 [dependencies]
@@ -60,12 +59,19 @@ criterion = {version = "0.5", features = ["html_reports"]}
 env_logger = "0.11"
 log = "0.4"
 logroller = "0.1.12"
+loom = "0.7"
 slog = "2.7"
 slog-async = "2.8"
 tempfile = "3"
 tracing = "0.1"
 tracing-appender = "0.2.5"
 tracing-subscriber = "0.3"
+
+# Custom cfg used for model-checking runs (`RUSTFLAGS="--cfg ticklog_loom"`).
+# Named `ticklog_loom` (not `loom`) so a global RUSTFLAGS cannot enable other
+# crates' internal `cfg(loom)` test scaffolding (e.g. `boxcar`).
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(ticklog_loom)"] }
 
 # Ticklog regression benches
 

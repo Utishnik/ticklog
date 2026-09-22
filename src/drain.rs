@@ -5,7 +5,6 @@
 //! access goes through [`Cursor`], the sole audit point for unsafe reads.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::encode::{FIXED_SIZES, TAG_COUNT, TAG_STR};
 use crate::format::{self, Field, FormatSpec, Segment, Template};
@@ -18,6 +17,7 @@ use crate::ring::RingBuffer;
 #[cfg(not(feature = "fifo-backend"))]
 use crate::ring::{SLOT_SIZE, align_up};
 use crate::sink::LogSink;
+use crate::sync::{AtomicBool, Ordering};
 use crate::thread_buf::REGISTRY;
 use crate::timestamp::{Calibration, format_iso8601, ticks_to_ns};
 
@@ -1010,7 +1010,7 @@ fn decode_and_format(
         fmt,
         file_line,
         thread_id,
-        thread_name.as_deref(),
+        thread_name,
         &tag_buf[..n_tags],
         &mut c,
         buf,

@@ -116,20 +116,24 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
-  # MSRV
-  msrv:
-    name: msrv (1.85)
+  # Loom model-checking for the lock-free ring / shutdown protocols.
+  # The cfg is `ticklog_loom` (not `loom`) so a global RUSTFLAGS cannot
+  # enable other crates' internal `cfg(loom)` scaffolding.
+  loom:
+    name: loom
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.85"
+          toolchain: stable
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: msrv
+          shared-key: loom
 
-      - name: Check with MSRV
-        run: cargo check --all-targets
+      - name: Run loom model tests
+        run: cargo test --lib --release -- loom_
+        env:
+          RUSTFLAGS: --cfg ticklog_loom

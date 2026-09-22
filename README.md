@@ -18,8 +18,6 @@ How it works: Log calls run exclusively on the calling thread's hot path: check 
 ticklog = "0.1"
 ```
 
-Requires Rust 1.85 or newer (edition 2024).
-
 ## Quick start
 
 ```rust

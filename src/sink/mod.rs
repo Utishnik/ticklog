@@ -130,10 +130,10 @@ impl Default for FanOut {
 impl LogSink for FanOut {
     fn accept(&mut self, line: &[u8], level: Level) -> io::Result<()> {
         for entry in &mut self.entries {
-            if level <= entry.max_level() {
-                if let Err(e) = entry.accept(line, level) {
-                    eprintln!("ticklog: sink error: {}", e);
-                }
+            if level <= entry.max_level()
+                && let Err(e) = entry.accept(line, level)
+            {
+                eprintln!("ticklog: sink error: {}", e);
             }
         }
         Ok(())

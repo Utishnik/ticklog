@@ -2,17 +2,23 @@
 //! waits for it to complete its final poll cycle.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread::JoinHandle;
 
+use crate::sync::{AtomicBool, Ordering};
 use crate::thread_buf::REGISTRY;
+
+/// Drain-thread handle type: `std` outside loom, `loom` under
+/// `RUSTFLAGS="--cfg ticklog_loom"` so `Guard::drop`'s join is model-checked.
+#[cfg(not(ticklog_loom))]
+type DrainHandle = std::thread::JoinHandle<()>;
+#[cfg(ticklog_loom)]
+type DrainHandle = loom::thread::JoinHandle<()>;
 
 /// A running logger. Keep it alive for as long as you want to log.
 ///
 /// Returned by [`configure!`][crate::configure!]. When the guard is dropped it marks every
 /// ring dead, signals the drain to exit, and joins the drain thread.
 pub struct Guard {
-    drain_thread: Option<JoinHandle<()>>,
+    drain_thread: Option<DrainHandle>,
     shutdown: Arc<AtomicBool>,
 }
 
@@ -22,7 +28,7 @@ impl Guard {
     ///
     /// `shutdown` must be the same `Arc<AtomicBool>` that the drain thread
     /// reads at the top of its poll loop.
-    pub(crate) fn new(drain_thread: JoinHandle<()>, shutdown: Arc<AtomicBool>) -> Self {
+    pub(crate) fn new(drain_thread: DrainHandle, shutdown: Arc<AtomicBool>) -> Self {
         Self {
             drain_thread: Some(drain_thread),
             shutdown,
@@ -37,11 +43,11 @@ impl Drop for Guard {
         // its spin path and bails when false, preventing a hang after the
         // drain is gone. Under `Drop` the ring fills and records are
         // discarded silently.
-        if let Some(registry) = REGISTRY.get() {
-            if let Ok(rings) = registry.lock() {
-                for ring in rings.iter() {
-                    ring.live.store(false, Ordering::Release);
-                }
+        if let Some(registry) = REGISTRY.get()
+            && let Ok(rings) = registry.lock()
+        {
+            for ring in rings.iter() {
+                ring.live.store(false, Ordering::Release);
             }
         }
 
@@ -51,17 +57,17 @@ impl Drop for Guard {
         self.shutdown.store(true, Ordering::Release);
 
         // Wait for the drain to complete its final poll cycle and exit.
-        if let Some(handle) = self.drain_thread.take() {
-            if let Err(e) = handle.join() {
-                // The drain thread panicked. Try to extract a message from
-                // the panic payload and write it to stderr.
-                if let Some(msg) = e.downcast_ref::<&str>() {
-                    eprintln!("ticklog: drain thread panicked: {}", msg);
-                } else if let Some(msg) = e.downcast_ref::<String>() {
-                    eprintln!("ticklog: drain thread panicked: {}", msg);
-                } else {
-                    eprintln!("ticklog: drain thread panicked");
-                }
+        if let Some(handle) = self.drain_thread.take()
+            && let Err(e) = handle.join()
+        {
+            // The drain thread panicked. Try to extract a message from
+            // the panic payload and write it to stderr.
+            if let Some(msg) = e.downcast_ref::<&str>() {
+                eprintln!("ticklog: drain thread panicked: {}", msg);
+            } else if let Some(msg) = e.downcast_ref::<String>() {
+                eprintln!("ticklog: drain thread panicked: {}", msg);
+            } else {
+                eprintln!("ticklog: drain thread panicked");
             }
         }
     }
@@ -70,14 +76,18 @@ impl Drop for Guard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sync::AtomicBool;
     use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
+    #[cfg(not(ticklog_loom))]
     use std::thread;
 
     #[test]
     fn new_wraps_handle_and_shutdown() {
         let shutdown = Arc::new(AtomicBool::new(false));
+        #[cfg(not(ticklog_loom))]
         let handle = thread::spawn(|| {});
+        #[cfg(ticklog_loom)]
+        let handle = loom::thread::spawn(|| {});
         let guard = Guard::new(handle, Arc::clone(&shutdown));
         assert!(guard.drain_thread.is_some());
         assert!(!guard.shutdown.load(Ordering::Relaxed));
@@ -87,6 +97,7 @@ mod tests {
     fn drop_sets_shutdown_flag() {
         let shutdown = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&shutdown);
+        #[cfg(not(ticklog_loom))]
         let handle = thread::spawn(move || {
             // Busy-wait until shutdown is signaled, then exit. The yield is a
             // real scheduling point so Miri's round-robin scheduler can run the
@@ -94,6 +105,12 @@ mod tests {
             while !flag.load(Ordering::Acquire) {
                 std::hint::spin_loop();
                 std::thread::yield_now();
+            }
+        });
+        #[cfg(ticklog_loom)]
+        let handle = loom::thread::spawn(move || {
+            while !flag.load(Ordering::Acquire) {
+                loom::thread::yield_now();
             }
         });
 
@@ -110,10 +127,18 @@ mod tests {
         let flag = Arc::clone(&shutdown);
         let done = Arc::clone(&exited);
 
+        #[cfg(not(ticklog_loom))]
         let handle = thread::spawn(move || {
             while !flag.load(Ordering::Acquire) {
                 std::hint::spin_loop();
                 std::thread::yield_now();
+            }
+            done.store(true, Ordering::Release);
+        });
+        #[cfg(ticklog_loom)]
+        let handle = loom::thread::spawn(move || {
+            while !flag.load(Ordering::Acquire) {
+                loom::thread::yield_now();
             }
             done.store(true, Ordering::Release);
         });

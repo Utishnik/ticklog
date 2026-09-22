@@ -80,11 +80,11 @@ mod custom {
     use std::cell::UnsafeCell;
     use std::sync::Arc;
     use std::sync::Mutex;
-    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
     use super::{Reservation, SLOT_SIZE, align_up};
     use crate::builder::Backpressure;
     use crate::record::{END_OF_BUFFER, MAX_RECORD_SIZE, VERSION};
+    use crate::sync::{AtomicBool, AtomicU64, Ordering};
 
     /// How many `reserve`+`publish` calls elapse before the producer stores a
     /// new `head` watermark under the `watermark-head` feature. 1000 matches
@@ -709,6 +709,14 @@ mod custom {
                         // Adaptive backoff: pause hints first, then yield to the
                         // scheduler so the drain thread makes progress.
                         backoff.wait();
+                        // Under model checking, bound the otherwise-infinite
+                        // spin: a path where the consumer never runs would
+                        // otherwise blow loom's branch budget. Real builds
+                        // still spin forever (see `backoff::Backoff`).
+                        #[cfg(ticklog_loom)]
+                        if backoff.loom_spins() >= 8 {
+                            return false;
+                        }
                     }
                 }
             }
@@ -803,13 +811,13 @@ mod custom {
         #[test]
         fn new_initializes_head_to_zero() {
             let rb = RingBuffer::new();
-            assert_eq!(rb.head().load(std::sync::atomic::Ordering::Relaxed), 0);
+            assert_eq!(rb.head().load(Ordering::Relaxed), 0);
         }
 
         #[test]
         fn new_initializes_tail_to_zero() {
             let rb = RingBuffer::new();
-            assert_eq!(rb.tail().load(std::sync::atomic::Ordering::Relaxed), 0);
+            assert_eq!(rb.tail().load(Ordering::Relaxed), 0);
         }
 
         #[test]
@@ -833,7 +841,7 @@ mod custom {
         #[test]
         fn new_sets_live_to_true() {
             let rb = RingBuffer::new();
-            assert!(rb.live.load(std::sync::atomic::Ordering::Relaxed));
+            assert!(rb.live.load(Ordering::Relaxed));
         }
 
         #[test]

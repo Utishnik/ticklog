@@ -41,7 +41,6 @@
 //! records drained inline from other positions.
 
 use std::collections::VecDeque;
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 use crate::builder::Backpressure;
@@ -49,6 +48,7 @@ use crate::drain::format_segment;
 use crate::format::Template;
 use crate::level::Level;
 use crate::ring::RingBuffer;
+use crate::sync::Ordering;
 use crate::timestamp::Calibration;
 
 /// Total memory budget for the NanoLog segment pool, in bytes. The pool size
@@ -204,7 +204,7 @@ impl Segments {
     pub(crate) fn first_ring(
         &self,
         helper: &mut Option<Arc<RingBuffer>>,
-        live: Option<&std::sync::atomic::AtomicBool>,
+        live: Option<&crate::sync::AtomicBool>,
     ) -> Option<Arc<RingBuffer>> {
         match self.policy {
             Backpressure::NanoLog => self.take_pooled(helper, live),
@@ -220,7 +220,7 @@ impl Segments {
     fn take_pooled(
         &self,
         helper: &mut Option<Arc<RingBuffer>>,
-        live: Option<&std::sync::atomic::AtomicBool>,
+        live: Option<&crate::sync::AtomicBool>,
     ) -> Option<Arc<RingBuffer>> {
         loop {
             // Do the drain's formatting work on our own handed-off segment
@@ -232,10 +232,10 @@ impl Segments {
             if let Some(ring) = self.try_take_spare() {
                 return Some(ring);
             }
-            if let Some(l) = live {
-                if !l.load(Ordering::Relaxed) {
-                    return None;
-                }
+            if let Some(l) = live
+                && !l.load(Ordering::Relaxed)
+            {
+                return None;
             }
             let mut guard = self.spare_cv.wait(self.spares.lock().unwrap()).unwrap();
             if let Some(ring) = guard.pop() {

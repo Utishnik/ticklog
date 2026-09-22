@@ -44,17 +44,8 @@ pub(crate) const HEADER_SIZE: usize = size_of::<u8>()  // version
     + size_of::<u64>(); // timestamp
 /// Encoded size of the site section: an 8-byte pointer to a [`Site`].
 pub(crate) const SITE_SECTION_SIZE: usize = size_of::<u64>();
-/// Encoded size of a legacy source section: an 8-byte pointer, a 2-byte
-/// length, and a 4-byte line number. Decoded from older wire records only.
-pub(crate) const SOURCE_SECTION_SIZE: usize = size_of::<u64>()  // file_ptr
-    + size_of::<u16>()  // file_len
-    + size_of::<u32>(); // line
 /// Size of the argument count byte that precedes the tags and payloads.
 pub(crate) const COUNT_SIZE: usize = size_of::<u8>();
-/// Encoded size of a legacy thread section base (without name bytes):
-/// an 8-byte thread id and a 2-byte name length prefix.
-pub(crate) const THREAD_SECTION_BASE_SIZE: usize = size_of::<u64>()  // thread_id
-    + size_of::<u16>(); // name_len
 
 /// Total size of a record's fixed sections, before any arguments: header,
 /// site, and the count byte. The logging macros hardcode this base (they

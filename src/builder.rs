@@ -3,8 +3,8 @@
 //! [`crate::configure!`] initializes logging and returns a [`Guard`]. Logging stops
 //! when the guard is dropped.
 
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::thread;
 
 use crate::affinity;
@@ -13,6 +13,7 @@ use crate::error::TicklogError;
 use crate::format::Template;
 use crate::guard::Guard;
 use crate::sink::LogSink;
+use crate::sync::AtomicBool;
 use crate::thread_buf::REGISTRY;
 use crate::timestamp;
 
@@ -252,6 +253,7 @@ pub fn __configure_rt(
     let _ = crate::thread_buf::RING_CAPACITY.set(ring_capacity);
 
     let drain_affinity_opt = drain_affinity.clone();
+    #[cfg(not(ticklog_loom))]
     let handle = thread::Builder::new()
         .name("ticklog-drain".to_string())
         .spawn(move || {
@@ -262,6 +264,14 @@ pub fn __configure_rt(
             drain.run();
         })
         .map_err(TicklogError::DrainSpawnFailed)?;
+    // Under loom, `configure!` is not exercised by model tests; keep a
+    // placeholder path so the module still compiles with loom atomics.
+    #[cfg(ticklog_loom)]
+    let handle = {
+        let _ = drain_affinity_opt;
+        let _ = drain;
+        loom::thread::spawn(|| {})
+    };
 
     Ok(Guard::new(handle, shutdown))
 }
