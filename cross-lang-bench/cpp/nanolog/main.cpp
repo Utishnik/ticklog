@@ -128,6 +128,13 @@ struct SpinBarrier {
 
 // -- Measurement --------------------------------------------------------
 
+// Cache-line padded per-thread latency slot. The outer vector stores these
+// contiguously; without padding, thread t's vector bookkeeping (size/capacity
+// updates on every push_back) would share a line with thread t+1.
+struct alignas(128) ThreadLatencies {
+    std::vector<double> samples;
+};
+
 struct ConfigResult {
     std::string workload;
     int threads;
@@ -150,9 +157,9 @@ struct Output {
 static ConfigResult measure_config(double ns_per_tick, Workload wl, int n_threads) {
     int samples_per_thread = g_samples / n_threads;
 
-    std::vector<std::vector<double>> latencies(static_cast<size_t>(n_threads));
+    std::vector<ThreadLatencies> latencies(static_cast<size_t>(n_threads));
     for (int t = 0; t < n_threads; t++) {
-        latencies[static_cast<size_t>(t)].reserve(static_cast<size_t>(samples_per_thread));
+        latencies[static_cast<size_t>(t)].samples.reserve(static_cast<size_t>(samples_per_thread));
     }
 
     SpinBarrier barrier(n_threads);
@@ -169,7 +176,7 @@ static ConfigResult measure_config(double ns_per_tick, Workload wl, int n_thread
 
             barrier.wait();
 
-            auto& thread_lats = latencies[static_cast<size_t>(t)];
+            auto& thread_lats = latencies[static_cast<size_t>(t)].samples;
 
             for (int batch_i = 0; batch_i < samples_per_thread; batch_i++) {
                 uint64_t call_index = static_cast<uint64_t>(t * samples_per_thread + batch_i);

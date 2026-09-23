@@ -81,7 +81,7 @@ mod custom {
     use std::sync::Arc;
     use std::sync::Mutex;
 
-    use super::{Reservation, SLOT_SIZE, align_up};
+    use super::{CACHE_LINE_SIZE, Reservation, SLOT_SIZE, align_up};
     use crate::builder::Backpressure;
     use crate::record::{END_OF_BUFFER, MAX_RECORD_SIZE, VERSION};
     use crate::sync::{AtomicBool, AtomicU64, Ordering};
@@ -93,24 +93,64 @@ mod custom {
     #[cfg(feature = "watermark-head")]
     pub(crate) const WATERMARK_HEAD_RECORDS: u64 = 1000;
 
-    /// Where the ring's bytes live. The classic path uses a crate-allocated
-    /// boxed slice; the segmented paths allocate from the shared `r3` arena so
-    /// per-thread buffers never touch the global allocator on the hot path.
+    /// Where the ring's bytes live. The classic path uses a cache-line-aligned
+    /// heap allocation; the segmented paths allocate from the shared `r3` arena
+    /// so per-thread buffers never touch the global allocator on the hot path.
     // SAFETY: both variants own their memory for as long as the `RingBuffer`
-    // (either the `Box` owns it, or the `Arc<r3::Arena>` keeps the region
-    // alive). The raw arena pointer derives from an allocation that is never
-    // reclaimed before the arena itself drops, and the arena is kept alive by
-    // every ring that references it, so no ring can outlive its memory.
+    // (either the `Owned` Drop deallocates it, or the `Arc<r3::Arena>` keeps
+    // the region alive). The raw arena pointer derives from an allocation that
+    // is never reclaimed before the arena itself drops, and the arena is kept
+    // alive by every ring that references it, so no ring can outlive its memory.
     pub(crate) enum DataStorage {
-        /// Default storage: `UnsafeCell<u8>` interior mutability, same layout
-        /// guarantees as before (never a whole-slice borrow racing a writer).
-        Box(Box<[UnsafeCell<u8>]>),
+        /// Default storage: a cache-line-aligned heap allocation so slot
+        /// offsets land on absolute cache-line boundaries (misaligned base
+        /// would let adjacent producer/drain records share a line).
+        Owned { ptr: *mut u8, capacity: usize },
         /// Arena-backed storage for the segmented policies. `_keep` pins the
-        /// arena so the region outlives this ring.
+        /// arena so the region outlives this ring. The pointer is advanced to
+        /// a cache-line boundary inside an over-allocated region.
         Arena {
             ptr: *mut u8,
             _keep: Arc<r3::Arena<u8>>,
         },
+    }
+
+    impl Drop for DataStorage {
+        fn drop(&mut self) {
+            if let DataStorage::Owned { ptr, capacity } = self {
+                // SAFETY: `ptr`/`capacity` came from `alloc` with this exact
+                // layout in `with_capacity` and are not freed anywhere else.
+                unsafe {
+                    std::alloc::dealloc(
+                        *ptr,
+                        std::alloc::Layout::from_size_align(*capacity, CACHE_LINE_SIZE)
+                            .expect("invariant: capacity is a power of two >= CACHE_LINE_SIZE"),
+                    );
+                }
+            }
+        }
+    }
+
+    /// Allocates `capacity` zeroed bytes aligned to [`CACHE_LINE_SIZE`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the global allocator fails (same contract as `vec!`).
+    fn alloc_aligned(capacity: usize) -> *mut u8 {
+        let layout = std::alloc::Layout::from_size_align(capacity, CACHE_LINE_SIZE)
+            .expect("invariant: capacity is a power of two >= CACHE_LINE_SIZE");
+        // SAFETY: layout has non-zero size (capacity >= SLOT_SIZE == CACHE_LINE_SIZE).
+        let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
+        if ptr.is_null() {
+            std::alloc::handle_alloc_error(layout);
+        }
+        ptr
+    }
+
+    /// Rounds `addr` up to the next [`CACHE_LINE_SIZE`] boundary.
+    #[inline(always)]
+    fn align_addr(addr: usize) -> usize {
+        (addr + CACHE_LINE_SIZE - 1) & !(CACHE_LINE_SIZE - 1)
     }
 
     /// Producer-cache-line half of the control state. Only the producer
@@ -255,14 +295,8 @@ mod custom {
                 capacity.is_power_of_two() && capacity >= SLOT_SIZE,
                 "invariant: ring capacity must be a power of two >= SLOT_SIZE, got {capacity}"
             );
-            // SAFETY: `UnsafeCell<u8>` is `repr(transparent)` over `u8`, so a
-            // zero-filled `Box<[u8]>` and a `Box<[UnsafeCell<u8>]>` of the same
-            // length share layout. The cast reinterprets the one heap buffer and
-            // preserves the slice length metadata.
-            let bytes = vec![0u8; capacity].into_boxed_slice();
-            let data: Box<[UnsafeCell<u8>]> =
-                unsafe { Box::from_raw(Box::into_raw(bytes) as *mut [UnsafeCell<u8>]) };
-            Self::from_storage(DataStorage::Box(data), capacity, false)
+            let ptr = alloc_aligned(capacity);
+            Self::from_storage(DataStorage::Owned { ptr, capacity }, capacity, false)
         }
 
         /// Creates a zero-initialized ring backed by the shared `r3` arena.
@@ -277,14 +311,17 @@ mod custom {
                 capacity.is_power_of_two() && capacity >= SLOT_SIZE,
                 "invariant: ring capacity must be a power of two >= SLOT_SIZE, got {capacity}"
             );
-            // SAFETY: `alloc_uninitialized` gives `capacity` readable/writable
-            // bytes inside a region the arena keeps alive; the `Arc` in the
-            // storage keeps the arena (and thus the bytes) valid for the whole
-            // lifetime of this ring. Zero-fill matches the `Box` constructor,
-            // which the drain relies on to treat zeroed slots as empty.
-            let slice = unsafe { arena.alloc_uninitialized(capacity) };
-            let ptr = slice.as_mut_ptr() as *mut u8;
-            // SAFETY: the whole `capacity`-byte region is initialized above.
+            // Over-allocate so the cache-line-aligned view still has
+            // `capacity` usable bytes after rounding the base up.
+            // SAFETY: `alloc_uninitialized` gives a writable region the arena
+            // keeps alive; the `Arc` in the storage pins it for this ring's
+            // whole lifetime. Zero-fill matches the owned constructor, which
+            // the drain relies on to treat zeroed slots as empty.
+            let slice = unsafe { arena.alloc_uninitialized(capacity + CACHE_LINE_SIZE - 1) };
+            let raw = slice.as_mut_ptr() as usize;
+            let ptr = align_addr(raw) as *mut u8;
+            // SAFETY: the aligned `capacity`-byte window lies inside the
+            // over-allocated region (worst case wastes CACHE_LINE_SIZE-1).
             unsafe {
                 std::ptr::write_bytes(ptr, 0, capacity);
             }
@@ -537,7 +574,7 @@ mod custom {
         #[inline(always)]
         pub(crate) fn data_ptr(&self) -> *mut u8 {
             match &self.data {
-                DataStorage::Box(data) => data.as_ptr() as *mut u8,
+                DataStorage::Owned { ptr, .. } => *ptr,
                 DataStorage::Arena { ptr, .. } => *ptr,
             }
         }
@@ -770,6 +807,27 @@ mod custom {
         #[test]
         fn ring_alignment_at_least_one_cache_line() {
             assert!(mem::align_of::<RingBuffer>() >= 64);
+        }
+
+        #[test]
+        fn data_ptr_is_cache_line_aligned() {
+            let rb = RingBuffer::new();
+            let addr = rb.data_ptr() as usize;
+            assert_eq!(
+                addr % CACHE_LINE_SIZE,
+                0,
+                "ring storage must sit on an absolute cache-line boundary"
+            );
+        }
+
+        #[test]
+        fn slot_addresses_are_cache_line_aligned() {
+            let rb = RingBuffer::new();
+            let base = rb.data_ptr() as usize;
+            for slot in 0..8 {
+                let addr = base + slot * SLOT_SIZE;
+                assert_eq!(addr % CACHE_LINE_SIZE, 0, "slot {slot}");
+            }
         }
 
         #[test]
