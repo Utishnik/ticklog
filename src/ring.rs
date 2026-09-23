@@ -299,9 +299,9 @@ mod custom {
             Self::from_storage(DataStorage::Owned { ptr, capacity }, capacity, false)
         }
 
-        /// Creates a ring backed by the shared `r3` arena. Arena regions are
-        /// per-thread, so carving this ring never takes a global allocation
-        /// lock and never touches the process allocator.
+        /// Creates a zero-initialized ring backed by the shared `r3` arena.
+        /// Arena regions are per-thread, so carving this ring never takes a
+        /// global allocation lock and never touches the process allocator.
         pub(crate) fn with_capacity_arena(
             capacity: usize,
             arena: Arc<r3::Arena<u8>>,
@@ -315,18 +315,16 @@ mod custom {
             // `capacity` usable bytes after rounding the base up.
             // SAFETY: `alloc_uninitialized` gives a writable region the arena
             // keeps alive; the `Arc` in the storage pins it for this ring's
-            // whole lifetime. The region is deliberately NOT zero-filled: this
-            // runs on every Quill segment handoff and NanoLog pool top-up, and
-            // a full-capacity memset is exactly the cost the segmented
-            // policies must avoid. Safe because the drain reads only the
-            // published range [tail, head): every byte it touches was written
-            // by the producer before its Release store of `head`, and the slot
-            // padding after a record's `total_size` is never read. Stale bytes
-            // left by a recycled segment are equally unreachable until the
-            // next producer overwrites them.
+            // whole lifetime. Zero-fill matches the owned constructor, which
+            // the drain relies on to treat zeroed slots as empty.
             let slice = unsafe { arena.alloc_uninitialized(capacity + CACHE_LINE_SIZE - 1) };
             let raw = slice.as_mut_ptr() as usize;
             let ptr = align_addr(raw) as *mut u8;
+            // SAFETY: the aligned `capacity`-byte window lies inside the
+            // over-allocated region (worst case wastes CACHE_LINE_SIZE-1).
+            unsafe {
+                std::ptr::write_bytes(ptr, 0, capacity);
+            }
             Self::from_storage(
                 DataStorage::Arena { ptr, _keep: arena },
                 capacity,
