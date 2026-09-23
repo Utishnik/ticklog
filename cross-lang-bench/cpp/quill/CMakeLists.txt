@@ -17,7 +17,10 @@ set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g")
 # quill's CMakeLists is fetched from GitHub by default. For air-gapped
 # / reconfigure-safe runs a full vendored checkout already lives in
 # vendor/quill; when present we build from it directly (no network).
-set(QUILL_VENDOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor/quill")
+# Point QUIILL_VENDOR_DIR elsewhere (e.g. vendor13/quill) to build against
+# a different quill release without touching the default checkout.
+set(QUILL_VENDOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor/quill" CACHE PATH "vendored quill checkout to build from")
+set(QUILL_FETCH_TAG "v12.1.0" CACHE STRING "quill Git tag to fetch when no vendored checkout is present")
 if(EXISTS "${QUILL_VENDOR_DIR}/CMakeLists.txt")
     message(STATUS "using vendored quill at ${QUILL_VENDOR_DIR}")
     add_subdirectory("${QUILL_VENDOR_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/_vendor/quill")
@@ -26,7 +29,7 @@ else()
     FetchContent_Declare(
         quill
         GIT_REPOSITORY https://github.com/odygrd/quill.git
-        GIT_TAG        v12.1.0
+        GIT_TAG        ${QUILL_FETCH_TAG}
         GIT_SHALLOW    TRUE
     )
     FetchContent_MakeAvailable(quill)
