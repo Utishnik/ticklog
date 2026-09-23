@@ -11,7 +11,10 @@ use crate::builder::Backpressure;
 use crate::error::TicklogError;
 #[cfg(not(feature = "fifo-backend"))]
 use crate::ring::Reservation;
+#[cfg(ticklog_split_ring)]
+use crate::ring::RingProducer;
 use crate::ring::{DEFAULT_RING_SIZE, RingBuffer};
+#[cfg(not(feature = "fifo-backend"))]
 use crate::sync::Ordering;
 
 /// A thread's local ring buffer and cached metadata.
@@ -19,7 +22,12 @@ use crate::sync::Ordering;
 /// Cached values (`thread_id`, `thread_name`) are set once at creation and
 /// never change. The ring is shared with the drain thread via [`Arc`].
 pub(crate) struct ThreadBuf {
-    /// The ring buffer this thread writes records into.
+    /// The ring buffer this thread writes records into. Under the split rtrb
+    /// layout this is the owned producer half; otherwise the drain shares an
+    /// [`Arc`].
+    #[cfg(ticklog_split_ring)]
+    pub(crate) ring: RingProducer,
+    #[cfg(not(ticklog_split_ring))]
     pub(crate) ring: Arc<RingBuffer>,
     /// A handed-off segment that this producer reserved for cooperative
     /// formatting while it waits for a free NanoLog pool segment. At most one
@@ -27,12 +35,17 @@ pub(crate) struct ThreadBuf {
     /// full segment and cannot produce more until it unblocks. The
     /// reservation is cleared in [`Drop`] so a dying producer never leaves
     /// the drain waiting on it.
+    #[cfg(not(feature = "fifo-backend"))]
     pub(crate) helper: Option<Arc<RingBuffer>>,
     /// Cached stable thread identifier.
+    #[cfg_attr(feature = "fifo-backend", allow(dead_code))]
     pub(crate) thread_id: u64,
     /// Cached thread name. Falls back to `<unnamed>` when the OS thread has no name.
+    #[cfg_attr(feature = "fifo-backend", allow(dead_code))]
     pub(crate) thread_name: String,
-    /// Reusable staging buffer for backend-record byte pushes. Only the
+    /// Reusable staging buffer for backend-record byte pushes. Seeded to
+    /// [`MAX_RECORD_SIZE`](crate::record::MAX_RECORD_SIZE) so the first log
+    /// after [`warm_up`] never reallocates on the caller. Only the
     /// experimental FIFO backends write records this way.
     #[cfg(feature = "fifo-backend")]
     pub(crate) staging: Vec<u8>,
@@ -46,14 +59,14 @@ impl Drop for ThreadBuf {
         #[cfg(not(feature = "fifo-backend"))]
         if let Some(ring) = self.helper.take() {
             ring.clear_helper_reservation();
-            ring.live.store(false, Ordering::Release);
+            ring.set_dead();
         }
         // Signal to the drain: no more records will be written.
         // Release pairs with the drain's Acquire load of `live`,
         // guaranteeing all prior head stores are visible.
-        self.ring.live.store(false, Ordering::Release);
-        // Arc<RingBuffer> dropped implicitly. Buffer stays alive if
-        // the drain still holds its clone.
+        self.ring.set_dead();
+        // Arc<RingBuffer> / RingProducer dropped implicitly. The buffer
+        // stays alive if the drain still holds its clone.
     }
 }
 
@@ -173,6 +186,10 @@ where
 
         if opt.is_none() {
             let capacity = RING_CAPACITY.get().copied().unwrap_or(DEFAULT_RING_SIZE);
+            // Split rtrb layout: the producer half is owned by this thread's
+            // ThreadBuf; the drain-side Registration goes into the registry.
+            #[cfg(ticklog_split_ring)]
+            let (ring, registration) = crate::rtrb_backend::split(capacity);
             #[cfg(not(feature = "fifo-backend"))]
             let ring = if crate::segments::Segments::installed() {
                 // Segmented policies allocate a producer's first buffer from
@@ -181,7 +198,7 @@ where
             } else {
                 Arc::new(RingBuffer::with_capacity(capacity))
             };
-            #[cfg(feature = "fifo-backend")]
+            #[cfg(all(feature = "fifo-backend", not(ticklog_split_ring)))]
             let ring = Arc::new(RingBuffer::with_capacity(capacity));
             let thread_id = get_stable_thread_id();
             let thread_name: String = thread::current()
@@ -204,14 +221,18 @@ where
             // exactly one producer), so the name is registered here once and
             // never repeated in the records.
             ring.set_thread_info(thread_id, &thread_name);
+            #[cfg(not(ticklog_split_ring))]
             register_ring(Arc::clone(&ring));
+            #[cfg(ticklog_split_ring)]
+            register_ring(Arc::new(registration));
             *opt = Some(ThreadBuf {
                 ring,
+                #[cfg(not(feature = "fifo-backend"))]
                 helper: None,
                 thread_id,
                 thread_name,
                 #[cfg(feature = "fifo-backend")]
-                staging: Vec::with_capacity(1024),
+                staging: Vec::with_capacity(crate::record::MAX_RECORD_SIZE),
             });
         }
 
@@ -351,6 +372,46 @@ mod tests {
         let _ = REGISTRY.set(Mutex::new(Vec::new()));
     }
 
+    /// Drain-side handle to the same ring a [`ThreadBuf`] owns: an `Arc`
+    /// under the shared layout, the `Registration` half under split rtrb.
+    #[cfg(not(ticklog_split_ring))]
+    type Observer = Arc<RingBuffer>;
+    #[cfg(ticklog_split_ring)]
+    type Observer = RingBuffer;
+
+    /// Builds a `ThreadBuf` plus a drain-side observer of the same ring.
+    fn tb_with_observer(thread_id: u64, thread_name: &str) -> (ThreadBuf, Observer) {
+        #[cfg(ticklog_split_ring)]
+        {
+            let (producer, registration) =
+                crate::rtrb_backend::split(crate::ring::DEFAULT_RING_SIZE);
+            let tb = ThreadBuf {
+                ring: producer,
+                #[cfg(not(feature = "fifo-backend"))]
+                helper: None,
+                thread_id,
+                thread_name: thread_name.into(),
+                #[cfg(feature = "fifo-backend")]
+                staging: Vec::new(),
+            };
+            (tb, registration)
+        }
+        #[cfg(not(ticklog_split_ring))]
+        {
+            let ring = Arc::new(RingBuffer::new());
+            let tb = ThreadBuf {
+                ring: Arc::clone(&ring),
+                #[cfg(not(feature = "fifo-backend"))]
+                helper: None,
+                thread_id,
+                thread_name: thread_name.into(),
+                #[cfg(feature = "fifo-backend")]
+                staging: Vec::new(),
+            };
+            (tb, ring)
+        }
+    }
+
     #[test]
     fn get_stable_thread_id_returns_nonzero() {
         let id = get_stable_thread_id();
@@ -359,56 +420,29 @@ mod tests {
 
     #[test]
     fn thread_buf_holds_ring_and_metadata() {
-        let ring = Arc::new(RingBuffer::new());
-        let tb = ThreadBuf {
-            ring: Arc::clone(&ring),
-            helper: None,
-            thread_id: 42,
-            thread_name: "test-thread".into(),
-            #[cfg(feature = "fifo-backend")]
-            staging: Vec::new(),
-        };
+        let (tb, observer) = tb_with_observer(42, "test-thread");
         assert_eq!(tb.thread_id, 42);
         assert_eq!(&tb.thread_name, "test-thread");
-        assert!(tb.ring.live.load(Ordering::Relaxed));
+        assert!(tb.ring.is_live());
+        assert!(observer.is_live());
     }
 
     #[test]
     fn drop_sets_live_to_false() {
-        let ring = Arc::new(RingBuffer::new());
-        let tb = ThreadBuf {
-            ring: Arc::clone(&ring),
-            helper: None,
-            thread_id: 1,
-            thread_name: "t".into(),
-            #[cfg(feature = "fifo-backend")]
-            staging: Vec::new(),
-        };
-        assert!(ring.live.load(Ordering::Relaxed));
+        let (tb, observer) = tb_with_observer(1, "t");
+        assert!(observer.is_live());
         drop(tb);
-        assert!(!ring.live.load(Ordering::Relaxed));
+        assert!(!observer.is_live());
     }
 
     #[test]
     fn buffer_survives_thread_buf_drop_when_other_arcs_exist() {
-        let ring = Arc::new(RingBuffer::new());
-        let other = Arc::clone(&ring);
-        let tb = ThreadBuf {
-            ring: Arc::clone(&ring),
-            helper: None,
-            thread_id: 1,
-            thread_name: "t".into(),
-            #[cfg(feature = "fifo-backend")]
-            staging: Vec::new(),
-        };
+        let (tb, observer) = tb_with_observer(1, "t");
         drop(tb);
-        // Drop set live = false on the shared RingBuffer.
-        assert!(!ring.live.load(Ordering::Relaxed));
-        // `other` is still a valid Arc; clone and drop without panic.
-        let still_here = Arc::clone(&other);
-        drop(still_here);
-        drop(ring);
-        drop(other);
+        // Drop set live = false on the shared state; the drain-side handle
+        // remains valid (its Arc/Registration still owns the ring state).
+        assert!(!observer.is_live());
+        drop(observer);
     }
 
     #[test]

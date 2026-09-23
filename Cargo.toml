@@ -71,7 +71,7 @@ tracing-subscriber = "0.3"
 # Named `ticklog_loom` (not `loom`) so a global RUSTFLAGS cannot enable other
 # crates' internal `cfg(loom)` test scaffolding (e.g. `boxcar`).
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(ticklog_loom)"] }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(ticklog_loom)", "cfg(ticklog_split_ring)"] }
 
 # Ticklog regression benches
 

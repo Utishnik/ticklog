@@ -107,6 +107,18 @@ impl RingBuffer {
             .clone()
     }
 
+    /// Whether the producer is still alive. Acquire pairs with
+    /// [`set_dead`](Self::set_dead)'s Release store.
+    pub(crate) fn is_live(&self) -> bool {
+        self.live.load(Ordering::Acquire)
+    }
+
+    /// Marks the ring dead: no more records will be written. Release pairs
+    /// with the drain's Acquire load of [`is_live`](Self::is_live).
+    pub(crate) fn set_dead(&self) {
+        self.live.store(false, Ordering::Release);
+    }
+
     /// Reserves space for a record of `total_size` bytes.
     ///
     /// Returns a dummy [`Reservation`] when space is available. The actual

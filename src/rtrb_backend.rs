@@ -9,30 +9,43 @@
 //! drain publish over N staged records and lets the harness control the chunk
 //! size at runtime via `--chunk-size` (records per ring chunk).
 //!
-//! Unlike `backend-ringbuffer`'s single shared lock (FIXO), rtrb splits the
-//! ring so the producer and the drain each lock only their **own** half
-//! (`Producer` vs `Consumer`), matching the ownership split of
-//! `backend-ringbuf`. The chunk API is the distinguishing feature: records are
-//! batched into ring chunks, and both the producer and the drain move whole
-//! chunks, never single bytes.
+//! # Ownership split (no hot-path locks)
+//!
+//! The ring is physically split into two owned halves:
+//!
+//! - [`RingProducer`] — the producer half, owned outright by this thread's
+//!   [`ThreadBuf`](crate::thread_buf::ThreadBuf). Its staging buffer and
+//!   chunk counter are plain fields: the hot path (`reserve`/`commit`) takes
+//!   `&mut self` and touches **zero mutexes and zero atomics** for bookkeeping.
+//! - [`Registration`] — the drain half (consumer + shared cold state),
+//!   registered as an `Arc` in the global registry. The consumer sits behind
+//!   a mutex that only the drain ever locks; shared identity (`live`,
+//!   thread info, capacity) lives in an [`RingShared`].
+//!
+//! The two halves meet only through rtrb's own lock-free ring and the
+//! `Arc`-shared cold state — mirroring the ownership split of
+//! `backend-ringbuf`, without that backend's per-half `Mutex` wrappers.
+//! The chunk API is the distinguishing feature: records are batched into ring
+//! chunks, and both the producer and the drain move whole chunks, never
+//! single bytes.
 //!
 //! # Capacity
 //!
 //! rtrb's ring is sized in **slots** (one `u8` per slot). Like `backend-ringbuf`
-//! the declared byte capacity is measured in slots, so `with_capacity` receives
-//! a byte capacity and rtrb keeps one empty slot (its internal convention) so
+//! the declared byte capacity is measured in slots, so the split receives a
+//! byte capacity and rtrb keeps one empty slot (its internal convention) so
 //! the producer never observes the exact full bound.
 //!
 //! # Chunk accounting
 //!
-//! `chunk_size` (set per ring, default 1) is the number of **records** staged
-//! by the producer before it flushes one rtrb chunk. `reserve` reserves staging
-//! room for `total_size` bytes; `commit` appends to the staged Vec and, when
-//! the staged record count reaches `chunk_size`, flushes the staged bytes as a
-//! single rtrb chunk.
+//! `chunk_size` (set per ring, default [`DEFAULT_CHUNK_SIZE`]) is the number
+//! of **records** staged by the producer before it flushes one rtrb chunk.
+//! `reserve` reserves staging room for `total_size` bytes; `commit` appends to
+//! the staged Vec and, when the staged record count reaches `chunk_size`,
+//! flushes the staged bytes as a single rtrb chunk.
 
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::AtomicUsize;
+use std::sync::{Arc, Mutex};
 
 use rtrb::Consumer as RtrbCons;
 use rtrb::Producer as RtrbProdCr;
@@ -40,201 +53,95 @@ use rtrb::RingBuffer as RtrbRing;
 
 /// Default number of staged records flushed per rtrb chunk when the harness
 /// does not set one explicitly. The harness writes it through
-/// [`crate::__private::__set_default_chunk_size`] before the runtime is built.
+/// [`crate::__private::DEFAULT_CHUNK_SIZE`] before the runtime is built.
 pub static DEFAULT_CHUNK_SIZE: AtomicUsize = AtomicUsize::new(1);
 
 use crate::builder::Backpressure;
 use crate::ring::Reservation;
+use crate::sync::{AtomicBool, AtomicU64, Ordering};
 
-/// A lock-free SPSC u8 ring backed by the `rtrb` crate's chunk API.
-pub(crate) struct RingBuffer {
-    /// Producer half. Locked only by the producer's `reserve`/`commit`.
-    prod: Mutex<RtrbProdCr<u8>>,
-    /// Consumer half. Locked only by the drain.
-    cons: Mutex<RtrbCons<u8>>,
+/// Cold state shared between the producer half ([`RingProducer`]) and the
+/// drain-side [`Registration`]. Never touched by the producer's hot path
+/// except the `live` check inside a full-ring spin.
+pub(crate) struct RingShared {
     /// Set to `false` by the producer on thread exit; the drain reads with
     /// Acquire to detect dead rings whose remaining bytes have been consumed.
-    pub(crate) live: AtomicBool,
-    /// Declared capacity in bytes (u8 slots).
+    live: AtomicBool,
+    /// Declared capacity in bytes (u8 slots), `effective - 1` (rtrb keeps one
+    /// internal slot of slack).
     capacity: usize,
     /// Stable thread id of this ring's producer, set at registration.
     thread_id: AtomicU64,
-    /// Producer thread name, set at registration.
+    /// Producer thread name, set at registration. Drain-side only.
     thread_name: Mutex<String>,
-    /// Bytes staged by the producer since the last chunk flush.
-    staged: Mutex<Vec<u8>>,
-    /// Records currently staged in `staged` (elements of the same length
-    /// contract as `impl Custom`/`ringbuf_backend`).
-    staged_records: AtomicUsize,
-    /// Records batched into one rtrb chunk before a flush.
-    chunk_size: AtomicUsize,
 }
 
-// SAFETY: the split protocol hands the producer and the drain disjoint halves
-// of the same SPSC channel; each half is confined to its own mutex and the
-// AtomicBool live flag follows the same acquire/release contract as the
-// `backend-ringbuf` backend.
-unsafe impl Sync for RingBuffer {}
-
-impl RingBuffer {
-    /// Creates a new ring buffer of the default
-    /// [`DEFAULT_RING_SIZE`](crate::ring::DEFAULT_RING_SIZE).
-    #[allow(dead_code)] // used only by tests; `with_capacity` is the hot path
-    pub(crate) fn new() -> Self {
-        Self::with_capacity(crate::ring::DEFAULT_RING_SIZE)
-    }
-
-    /// Creates a new u8 ring of `capacity` bytes (slots).
-    pub(crate) fn with_capacity(capacity: usize) -> Self {
-        let effective = if capacity < crate::ring::SLOT_SIZE {
-            crate::ring::SLOT_SIZE
-        } else {
-            capacity
-        };
-        assert!(
-            effective.is_power_of_two(),
-            "invariant: rtrb ring capacity must be a power of two, got {capacity}"
-        );
-        // rtrb keeps one empty slot so the consumer can distinguish empty from
-        // full; ticklog's byte accounting therefore reports the capacity the
-        // producer is allowed to fill as `capacity - 1`, matching every other
-        // backend.
-        let (prod, cons) = RtrbRing::new(effective.saturating_sub(1));
+impl RingShared {
+    fn new(capacity: usize) -> Self {
         Self {
-            prod: Mutex::new(prod),
-            cons: Mutex::new(cons),
             live: AtomicBool::new(true),
-            capacity: effective.saturating_sub(1),
+            capacity,
             thread_id: AtomicU64::new(0),
             thread_name: Mutex::new(String::new()),
-            staged: Mutex::new(Vec::new()),
-            staged_records: AtomicUsize::new(0),
-            chunk_size: AtomicUsize::new(DEFAULT_CHUNK_SIZE.load(Ordering::Relaxed).max(1)),
         }
-    }
-
-    /// Sets the number of records flushed per rtrb chunk for this ring. A
-    /// non-zero `n` takes effect from the next [`commit`](Self::commit).
-    pub(crate) fn set_chunk_size(&self, n: usize) {
-        if n > 0 {
-            self.chunk_size.store(n, Ordering::Relaxed);
-        }
-    }
-
-    /// Records this ring's producer identity.
-    pub(crate) fn set_thread_info(&self, thread_id: u64, thread_name: &str) {
-        self.thread_id.store(thread_id, Ordering::Relaxed);
-        let mut guard = self.thread_name.lock().unwrap_or_else(|e| e.into_inner());
-        *guard = thread_name.to_string();
     }
 
     /// Identity used by the drain when formatting this ring's records.
-    pub(crate) fn thread_id(&self) -> u64 {
+    fn thread_id(&self) -> u64 {
         self.thread_id.load(Ordering::Relaxed)
     }
 
     /// Identity used by the drain when formatting this ring's records.
-    pub(crate) fn thread_name(&self) -> String {
+    fn thread_name(&self) -> String {
         self.thread_name
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
     }
 
-    /// Asserts there is at least `total_size` bytes of room in the ring plus
-    /// currently staged bytes. Returns a dummy [`Reservation`] when there is.
-    ///
-    /// Mirrors [`backend-ringbuf`](crate::ringbuf_backend) exactly: staged
-    /// bytes count against capacity because they are flushed to the ring at
-    /// commit time. Under [`Backpressure::Drop`] returns `None` when the
-    /// producer cannot flush its staged chunk + the new record; under
-    /// [`Backpressure::Block`] (and the segmented policies, degraded) spins.
-    pub(crate) fn reserve(&self, total_size: usize, policy: Backpressure) -> Option<Reservation> {
-        let mut backoff = crate::backoff::Backoff::new();
-        loop {
-            let capacity = self.capacity;
-            let staged_len = self.staged.lock().unwrap_or_else(|e| e.into_inner()).len();
-            // Room needed to flush the staged chunk and place the new record.
-            let needed = staged_len.saturating_add(total_size);
-            let room = capacity;
-            let prod = self.prod.lock().unwrap_or_else(|e| e.into_inner());
-            // rtrb::Producer::slots() reports the *free* (writable) slots
-            // (`capacity - distance`), so the occupied bytes are the declared
-            // room minus the free slots. rtrb keeps its own internal slack so
-            // the consumer can distinguish empty from full, which means the
-            // drained tail only needs to have freed `needed` bytes.
-            let free = prod.slots();
-            let occupied = room.saturating_sub(free);
-            let enough = occupied.saturating_add(needed) < room;
-            drop(prod);
-            if enough {
-                return Some(Reservation {
-                    ptr: std::ptr::null_mut(),
-                    head: 0,
-                });
-            }
-            match policy {
-                Backpressure::Drop => return None,
-                Backpressure::NanoLog | Backpressure::Quill | Backpressure::Block => {
-                    if !self.live.load(Ordering::Relaxed) {
-                        return None;
-                    }
-                    backoff.wait();
-                }
-            }
-        }
+    /// Records this ring's producer identity.
+    fn set_thread_info(&self, thread_id: u64, thread_name: &str) {
+        self.thread_id.store(thread_id, Ordering::Relaxed);
+        let mut guard = self.thread_name.lock().unwrap_or_else(|e| e.into_inner());
+        *guard = thread_name.to_string();
     }
+}
 
-    /// Publish is a no-op for the rtrb backend: the real write happens inside
-    /// [`commit`](Self::commit).
-    #[allow(dead_code)] // part of the shared RingBuffer interface; custom-only
-    #[inline(always)]
-    pub(crate) fn publish(&self, _r: Reservation) {}
+/// Producer half of the split ring. Owned by the thread's
+/// [`ThreadBuf`](crate::thread_buf::ThreadBuf); never shared, so staging is a
+/// plain `Vec` and the hot path runs without any lock or atomic bookkeeping.
+pub(crate) struct RingProducer {
+    /// rtrb producer half; only this thread ever touches it.
+    prod: RtrbProdCr<u8>,
+    /// Bytes staged by the producer since the last chunk flush. Seeded to
+    /// [`MAX_RECORD_SIZE`](crate::record::MAX_RECORD_SIZE) in [`split`] so the
+    /// first post-`warm_up` `commit` never reallocates on the caller.
+    staged: Vec<u8>,
+    /// Records currently staged in `staged`.
+    staged_records: usize,
+    /// Records batched into one rtrb chunk before a flush.
+    chunk_size: usize,
+    /// Cold state shared with the drain-side [`Registration`].
+    shared: Arc<RingShared>,
+}
 
-    /// Stages the record bytes and flushes a chunk to the rtrb ring when the
-    /// staged record count reaches `chunk_size`.
-    ///
-    /// Must be called after [`reserve`](Self::reserve) succeeds. `reserve`
-    /// guaranteed the staged Bytes + the new record together fit the ring, so
-    /// the chunk flush never fails.
-    pub(crate) fn commit(&self, bytes: &[u8]) {
-        let chunk_size = self.chunk_size.load(Ordering::Relaxed).max(1);
-        let mut staged = self.staged.lock().unwrap_or_else(|e| e.into_inner());
-        staged.extend_from_slice(bytes);
-        let records = self.staged_records.fetch_add(1, Ordering::Relaxed) + 1;
-        if records >= chunk_size {
-            let mut prod = self.prod.lock().unwrap_or_else(|e| e.into_inner());
-            // SAFETY: `reserve` verified `staged.len()` bytes of room and rtrb
-            // keeps one slot of slack, so `write_chunk` with the whole staged
-            // slice can never fail.
-            let to_flush = staged.len();
-            if to_flush > 0 {
-                let mut wchunk = prod
-                    .write_chunk(to_flush)
-                    .expect("ticklog staged flush: reserve promised room");
-                {
-                    let (a, b) = wchunk.as_mut_slices();
-                    a.copy_from_slice(&staged[..a.len()]);
-                    if !b.is_empty() {
-                        b.copy_from_slice(&staged[a.len()..]);
-                    }
-                }
-                wchunk.commit_all();
-                staged.clear();
-                self.staged_records.store(0, Ordering::Relaxed);
-            }
-        }
-    }
+/// Consumer half of the split ring, owned by the drain-side [`Registration`]
+/// behind its drain-only mutex.
+pub(crate) struct RingConsumer {
+    /// rtrb consumer half; only the drain (under the registration mutex)
+    /// ever touches it.
+    cons: RtrbCons<u8>,
+}
 
+impl RingConsumer {
     /// Moves every available ring byte into `out`, returning how many were
     /// moved. Called by the drain; never invoked by the producer.
-    pub(crate) fn pop_available(&self, out: &mut Vec<u8>) -> usize {
-        let mut cons = self.cons.lock().unwrap_or_else(|e| e.into_inner());
-        if cons.is_empty() {
+    fn pop_available(&mut self, out: &mut Vec<u8>) -> usize {
+        if self.cons.is_empty() {
             return 0;
         }
         let before = out.len();
-        let available = cons.slots();
+        let available = self.cons.slots();
         out.resize(before + available, 0);
         let mut written = 0;
         // rtrb: read chunk by chunk so whole ring chunks are moved together.
@@ -246,7 +153,7 @@ impl RingBuffer {
             if remaining == 0 {
                 break;
             }
-            match cons.read_chunk(remaining) {
+            match self.cons.read_chunk(remaining) {
                 Err(_) => break,
                 Ok(chunk) => {
                     let (a, b) = chunk.as_slices();
@@ -266,20 +173,229 @@ impl RingBuffer {
         out.truncate(before + written);
         written
     }
+}
+
+/// Drain-side registration of a split ring: the consumer half plus the shared
+/// cold state. Exported from [`crate::ring`] as `RingBuffer` under the split
+/// layout, so the drain, the registry, and the guard see the same type name
+/// as every other backend.
+pub(crate) struct Registration {
+    /// Consumer half. Locked only by the drain (a drain-only critical
+    /// section; the producer never contends for it).
+    consumer: Mutex<RingConsumer>,
+    /// Cold state shared with the producer half.
+    shared: Arc<RingShared>,
+}
+
+/// Splits a new u8 ring of `capacity` bytes (slots) into its producer and
+/// drain-side halves.
+///
+/// # Panics
+///
+/// Panics if `capacity` is not a power of two or is smaller than
+/// [`SLOT_SIZE`](crate::ring::SLOT_SIZE).
+pub(crate) fn split(capacity: usize) -> (RingProducer, Registration) {
+    let effective = if capacity < crate::ring::SLOT_SIZE {
+        crate::ring::SLOT_SIZE
+    } else {
+        capacity
+    };
+    assert!(
+        effective.is_power_of_two(),
+        "invariant: rtrb ring capacity must be a power of two, got {capacity}"
+    );
+    // rtrb keeps one empty slot so the consumer can distinguish empty from
+    // full; ticklog's byte accounting therefore reports the capacity the
+    // producer is allowed to fill as `capacity - 1`, matching every other
+    // backend.
+    let usable = effective.saturating_sub(1);
+    let (prod, cons) = RtrbRing::new(usable);
+    let shared = Arc::new(RingShared::new(usable));
+    let producer = RingProducer {
+        prod,
+        // Seed to MAX_RECORD_SIZE so the first post-`warm_up` `commit` never
+        // reallocates on the caller: with the default `chunk_size = 1` one
+        // record is staged at a time and any record that passes the size gate
+        // fits. Larger chunk batches may amortize a growth beyond this bound.
+        staged: Vec::with_capacity(crate::record::MAX_RECORD_SIZE),
+        staged_records: 0,
+        chunk_size: DEFAULT_CHUNK_SIZE.load(Ordering::Relaxed).max(1),
+        shared: Arc::clone(&shared),
+    };
+    let registration = Registration {
+        consumer: Mutex::new(RingConsumer { cons }),
+        shared,
+    };
+    (producer, registration)
+}
+
+impl RingProducer {
+    /// Records this ring's producer identity in the shared cold state.
+    pub(crate) fn set_thread_info(&self, thread_id: u64, thread_name: &str) {
+        self.shared.set_thread_info(thread_id, thread_name);
+    }
+
+    /// Marks the producer side dead: no more records will be written. Release
+    /// pairs with the drain's Acquire load of [`Registration::is_live`],
+    /// guaranteeing all prior staging flushes are visible.
+    pub(crate) fn set_dead(&self) {
+        self.shared.live.store(false, Ordering::Release);
+    }
+
+    /// Whether the producer is still alive (Acquire). Tests only; the
+    /// producer's own spin path reads `shared.live` with Relaxed directly.
+    #[allow(dead_code)] // used only by tests
+    pub(crate) fn is_live(&self) -> bool {
+        self.shared.live.load(Ordering::Acquire)
+    }
+
+    /// Sets the number of records flushed per rtrb chunk for this ring. A
+    /// non-zero `n` takes effect from the next [`commit`](Self::commit).
+    #[allow(dead_code)] // per-ring override; the harness writes DEFAULT_CHUNK_SIZE
+    pub(crate) fn set_chunk_size(&mut self, n: usize) {
+        if n > 0 {
+            self.chunk_size = n;
+        }
+    }
+
+    /// Asserts there is at least `total_size` bytes of room in the ring plus
+    /// currently staged bytes. Returns a dummy [`Reservation`] when there is.
+    ///
+    /// Mirrors [`backend-ringbuf`](crate::ringbuf_backend) exactly: staged
+    /// bytes count against capacity because they are flushed to the ring at
+    /// commit time. Under [`Backpressure::Drop`] returns `None` when the
+    /// producer cannot flush its staged chunk + the new record; under
+    /// [`Backpressure::Block`] (and the segmented policies, degraded) spins.
+    pub(crate) fn reserve(
+        &mut self,
+        total_size: usize,
+        policy: Backpressure,
+    ) -> Option<Reservation> {
+        let mut backoff = crate::backoff::Backoff::new();
+        loop {
+            let capacity = self.shared.capacity;
+            // Room needed to flush the staged chunk and place the new record.
+            let needed = self.staged.len().saturating_add(total_size);
+            let room = capacity;
+            // rtrb::Producer::slots() reports the *free* (writable) slots
+            // (`capacity - distance`), so the occupied bytes are the declared
+            // room minus the free slots. rtrb keeps its own internal slack so
+            // the consumer can distinguish empty from full, which means the
+            // drained tail only needs to have freed `needed` bytes.
+            let free = self.prod.slots();
+            let occupied = room.saturating_sub(free);
+            let enough = occupied.saturating_add(needed) < room;
+            if enough {
+                return Some(Reservation {
+                    ptr: std::ptr::null_mut(),
+                    head: 0,
+                });
+            }
+            match policy {
+                Backpressure::Drop => return None,
+                Backpressure::NanoLog | Backpressure::Quill | Backpressure::Block => {
+                    if !self.shared.live.load(Ordering::Relaxed) {
+                        return None;
+                    }
+                    backoff.wait();
+                }
+            }
+        }
+    }
+
+    /// Stages the record bytes and flushes a chunk to the rtrb ring when the
+    /// staged record count reaches `chunk_size`.
+    ///
+    /// Must be called after [`reserve`](Self::reserve) succeeds. `reserve`
+    /// guaranteed the staged bytes + the new record together fit the ring, so
+    /// the chunk flush never fails.
+    pub(crate) fn commit(&mut self, bytes: &[u8]) {
+        self.staged.extend_from_slice(bytes);
+        self.staged_records += 1;
+        if self.staged_records >= self.chunk_size.max(1) {
+            let to_flush = self.staged.len();
+            if to_flush > 0 {
+                // SAFETY: `reserve` verified `staged.len()` bytes of room and
+                // rtrb keeps one slot of slack, so `write_chunk` with the
+                // whole staged slice can never fail.
+                let mut wchunk = self
+                    .prod
+                    .write_chunk(to_flush)
+                    .expect("ticklog staged flush: reserve promised room");
+                {
+                    let (a, b) = wchunk.as_mut_slices();
+                    a.copy_from_slice(&self.staged[..a.len()]);
+                    if !b.is_empty() {
+                        b.copy_from_slice(&self.staged[a.len()..]);
+                    }
+                }
+                wchunk.commit_all();
+                self.staged.clear();
+                self.staged_records = 0;
+            }
+        }
+    }
+}
+
+impl Registration {
+    /// Moves every available ring byte into `out`, returning how many were
+    /// moved. Called by the drain; never invoked by the producer.
+    pub(crate) fn pop_available(&self, out: &mut Vec<u8>) -> usize {
+        let mut consumer = self.consumer.lock().unwrap_or_else(|e| e.into_inner());
+        consumer.pop_available(out)
+    }
 
     /// Whether the FIFO currently holds no bytes.
     #[allow(dead_code)] // used only by tests
     pub(crate) fn is_empty(&self) -> bool {
-        self.cons
+        self.consumer
             .lock()
             .unwrap_or_else(|e| e.into_inner())
+            .cons
             .is_empty()
     }
 
     /// Declared capacity in bytes.
     #[allow(dead_code)] // used by tests to validate capacity clamping
     pub(crate) fn capacity(&self) -> usize {
-        self.capacity
+        self.shared.capacity
+    }
+
+    /// Records this ring's producer identity in the shared cold state.
+    #[allow(dead_code)] // production sets it on the RingProducer half
+    pub(crate) fn set_thread_info(&self, thread_id: u64, thread_name: &str) {
+        self.shared.set_thread_info(thread_id, thread_name);
+    }
+
+    /// Identity used by the drain when formatting this ring's records.
+    pub(crate) fn thread_id(&self) -> u64 {
+        self.shared.thread_id()
+    }
+
+    /// Identity used by the drain when formatting this ring's records.
+    pub(crate) fn thread_name(&self) -> String {
+        self.shared.thread_name()
+    }
+
+    /// Whether the producer is still alive. Acquire pairs with the
+    /// producer's [`RingProducer::set_dead`] Release store.
+    pub(crate) fn is_live(&self) -> bool {
+        self.shared.live.load(Ordering::Acquire)
+    }
+
+    /// Marks the ring dead (guard shutdown / tests). Release pairs with the
+    /// drain's Acquire load in `is_live`.
+    pub(crate) fn set_dead(&self) {
+        self.shared.live.store(false, Ordering::Release);
+    }
+
+    /// A live registration whose producer half was dropped without marking
+    /// the ring dead (`RingProducer` has no Drop impl), for tests that only
+    /// need the drain-side handle.
+    #[cfg(test)]
+    pub(crate) fn new() -> Self {
+        let (_producer, registration) = split(crate::ring::DEFAULT_RING_SIZE);
+        registration
     }
 }
 
@@ -291,27 +407,27 @@ mod tests {
     const ROOM: usize = crate::ring::SLOT_SIZE; // a tiny power-of-two ring
 
     #[test]
-    fn new_default_capacity() {
-        let rb = RingBuffer::new();
-        // `with_capacity` reports `effective - 1` (rtrb keeps one slot of
-        // slack), so the default ring's declared capacity is default - 1.
-        assert_eq!(rb.capacity(), crate::ring::DEFAULT_RING_SIZE - 1);
+    fn split_default_capacity() {
+        let (_producer, registration) = split(crate::ring::DEFAULT_RING_SIZE);
+        // `split` reports `effective - 1` (rtrb keeps one slot of slack), so
+        // the default ring's declared capacity is default - 1.
+        assert_eq!(registration.capacity(), crate::ring::DEFAULT_RING_SIZE - 1);
     }
 
     #[test]
     fn reserve_and_commit_fills_fifo() {
-        let rb = RingBuffer::with_capacity(CAP);
-        rb.set_chunk_size(1); // flush every record as its own chunk
+        let (mut producer, registration) = split(CAP);
+        producer.set_chunk_size(1); // flush every record as its own chunk
         let payload = vec![0xABu8; 100];
-        let slot = rb.reserve(payload.len(), Backpressure::Drop).unwrap();
+        let slot = producer.reserve(payload.len(), Backpressure::Drop).unwrap();
         assert!(slot.ptr.is_null()); // dummy for rtrb; bytes move in commit()
-        rb.commit(&payload);
-        assert!(rb.live.load(Ordering::Relaxed));
-        assert!(!rb.is_empty());
+        producer.commit(&payload);
+        assert!(registration.is_live());
+        assert!(!registration.is_empty());
         let mut out = Vec::new();
-        assert_eq!(rb.pop_available(&mut out), payload.len());
+        assert_eq!(registration.pop_available(&mut out), payload.len());
         assert_eq!(out, payload);
-        assert!(rb.is_empty());
+        assert!(registration.is_empty());
     }
 
     #[test]
@@ -320,31 +436,23 @@ mod tests {
         // = `room`) cannot reserve because reserve requires
         // `occupied + needed < room` (rtrb keeps one slot of slack), so we fill
         // with `ROOM - 2` and then the next reserve must fail under Drop.
-        let rb = RingBuffer::with_capacity(ROOM);
+        let (mut producer, _registration) = split(ROOM);
         let payload = vec![0u8; ROOM - 2];
-        let _slot = rb.reserve(payload.len(), Backpressure::Drop).unwrap();
-        rb.commit(&payload);
-        assert!(rb.reserve(1, Backpressure::Drop).is_none());
-    }
-
-    #[test]
-    fn publish_is_noop() {
-        let rb = RingBuffer::with_capacity(CAP);
-        let slot = rb.reserve(1, Backpressure::Drop).unwrap();
-        rb.publish(slot); // must not panic or corrupt the caches
-        assert!(rb.is_empty());
+        let _slot = producer.reserve(payload.len(), Backpressure::Drop).unwrap();
+        producer.commit(&payload);
+        assert!(producer.reserve(1, Backpressure::Drop).is_none());
     }
 
     #[test]
     fn pop_available_moves_all_bytes_in_order() {
-        let rb = RingBuffer::with_capacity(CAP);
-        rb.set_chunk_size(1); // flush one record per chunk so order is exact
-        rb.commit(b"abc");
-        rb.commit(b"def");
+        let (mut producer, registration) = split(CAP);
+        producer.set_chunk_size(1); // flush one record per chunk so order is exact
+        producer.commit(b"abc");
+        producer.commit(b"def");
         let mut out = Vec::new();
-        assert_eq!(rb.pop_available(&mut out), 6);
+        assert_eq!(registration.pop_available(&mut out), 6);
         assert_eq!(out, b"abcdef");
-        assert!(rb.is_empty());
+        assert!(registration.is_empty());
     }
 
     #[test]
@@ -352,38 +460,60 @@ mod tests {
         // Regression: read_chunk may return a wrap (as_slices -> a|b with both
         // halves non-empty). The old code copy_from_slice'd `a` into a window
         // sized a.len()+b.len() and panicked.
-        let rb = RingBuffer::with_capacity(ROOM);
-        rb.set_chunk_size(1);
+        let (mut producer, registration) = split(ROOM);
+        producer.set_chunk_size(1);
         let first = vec![0xAAu8; 40];
-        rb.commit(&first);
+        producer.commit(&first);
         let mut out = Vec::new();
-        assert_eq!(rb.pop_available(&mut out), 40);
+        assert_eq!(registration.pop_available(&mut out), 40);
         assert_eq!(out, first);
         // Second write starts near the physical end and wraps to the start.
         let second = vec![0xBBu8; 40];
-        rb.reserve(second.len(), Backpressure::Drop).unwrap();
-        rb.commit(&second);
+        producer.reserve(second.len(), Backpressure::Drop).unwrap();
+        producer.commit(&second);
         let mut wrapped = Vec::new();
-        assert_eq!(rb.pop_available(&mut wrapped), 40);
+        assert_eq!(registration.pop_available(&mut wrapped), 40);
         assert_eq!(wrapped, second);
-        assert!(rb.is_empty());
+        assert!(registration.is_empty());
     }
 
     #[test]
     fn staged_records_flush_only_when_chunk_size_reached() {
-        let rb = RingBuffer::with_capacity(CAP);
-        rb.set_chunk_size(2);
+        let (mut producer, registration) = split(CAP);
+        producer.set_chunk_size(2);
         // Two small records, then two >chunk_size; the first flush happens only
         // once the staged record count reaches 2, and the ring only becomes
         // non-empty after that flush.
-        rb.commit(b"11");
+        producer.commit(b"11");
         // staged: 1 record; chunk_size 2 -> not yet flushed -> ring stays empty
-        assert!(rb.is_empty());
-        rb.commit(b"22");
-        assert!(!rb.is_empty());
+        assert!(registration.is_empty());
+        producer.commit(b"22");
+        assert!(!registration.is_empty());
         let mut out = Vec::new();
-        assert_eq!(rb.pop_available(&mut out), 4);
+        assert_eq!(registration.pop_available(&mut out), 4);
         assert_eq!(out, b"1122");
-        assert!(rb.is_empty());
+        assert!(registration.is_empty());
+    }
+
+    #[test]
+    fn set_dead_marks_registration_dead() {
+        let (producer, registration) = split(CAP);
+        assert!(registration.is_live());
+        assert!(producer.is_live());
+        producer.set_dead();
+        assert!(!registration.is_live());
+        assert!(!producer.is_live());
+    }
+
+    #[test]
+    fn thread_info_roundtrip_through_shared() {
+        let (producer, registration) = split(CAP);
+        producer.set_thread_info(7, "worker");
+        assert_eq!(registration.thread_id(), 7);
+        assert_eq!(registration.thread_name(), "worker");
+        // Re-registration (handoff) overwrites the previous identity.
+        producer.set_thread_info(8, "worker-2");
+        assert_eq!(registration.thread_id(), 8);
+        assert_eq!(registration.thread_name(), "worker-2");
     }
 }

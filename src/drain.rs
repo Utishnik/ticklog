@@ -378,9 +378,9 @@ impl Drain {
         // that are live, or reserved (a blocked producer formatting its own
         // segment, or a producer whose Drop clears the reservation any moment).
         #[cfg(not(feature = "fifo-backend"))]
-        let keep = |r: &Arc<RingBuffer>| r.live.load(Ordering::Acquire) || r.helper_reserved();
+        let keep = |r: &Arc<RingBuffer>| r.is_live() || r.helper_reserved();
         #[cfg(feature = "fifo-backend")]
-        let keep = |r: &Arc<RingBuffer>| r.live.load(Ordering::Acquire);
+        let keep = |r: &Arc<RingBuffer>| r.is_live();
 
         // Rings that are closing down now (dead and unreserved): drained and
         // recycled outside the lock below. A reserved ring is never finalized
@@ -684,7 +684,7 @@ fn drain_ring_inner(
         // producer's final publish, so the Acquire load below orders that
         // store (making the producer-private position safe to read) and this
         // flush publishes the tail so no record is lost.
-        if !ring.live.load(Ordering::Acquire) {
+        if !ring.is_live() {
             ring.flush_watermark();
         }
     }
@@ -825,6 +825,11 @@ fn drain_ring(
     buf: &mut Vec<u8>,
 ) -> bool {
     ring.pop_available(staging);
+    // Thread identity lives on the ring (registered once per incarnation),
+    // never in the records. Snapshot it once per pass — a cheap atomic load
+    // plus one small-string clone — so formatting needs no per-record lock.
+    let ring_thread_id = ring.thread_id();
+    let ring_thread_name = ring.thread_name();
     let mut had_work = false;
     let mut pos = 0usize;
     while staging.len() - pos >= HEADER_SIZE {
@@ -863,8 +868,8 @@ fn drain_ring(
             timezone_offset,
             calibration,
             line_pattern,
-            ring.thread_id(),
-            &ring.thread_name(),
+            ring_thread_id,
+            &ring_thread_name,
             buf,
         );
         if let Err(e) = sink.accept(buf, level) {

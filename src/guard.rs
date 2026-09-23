@@ -47,7 +47,7 @@ impl Drop for Guard {
             && let Ok(rings) = registry.lock()
         {
             for ring in rings.iter() {
-                ring.live.store(false, Ordering::Release);
+                ring.set_dead();
             }
         }
 

@@ -343,6 +343,7 @@ fn loom_thread_buf_drop_publishes_live_false() {
 
         let tb = ThreadBuf {
             ring: Arc::clone(&ring),
+            #[cfg(not(feature = "fifo-backend"))]
             helper: None,
             thread_id: 1,
             thread_name: "loom".into(),

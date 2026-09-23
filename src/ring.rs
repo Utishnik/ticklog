@@ -403,6 +403,18 @@ mod custom {
             guard.clone()
         }
 
+        /// Whether the producer is still alive. Acquire pairs with
+        /// [`set_dead`](Self::set_dead)'s Release store.
+        pub(crate) fn is_live(&self) -> bool {
+            self.live.load(Ordering::Acquire)
+        }
+
+        /// Marks the ring dead: no more records will be written. Release
+        /// pairs with the drain's Acquire load of [`is_live`](Self::is_live).
+        pub(crate) fn set_dead(&self) {
+            self.live.store(false, Ordering::Release);
+        }
+
         /// Whether a blocked producer has reserved this segment for
         /// cooperative formatting (NanoLog pool exhaustion).
         #[inline(always)]
@@ -1121,13 +1133,8 @@ mod custom {
 pub(crate) use crate::ringbuf_backend::RingBuffer;
 #[cfg(feature = "backend-ringbuffer")]
 pub(crate) use crate::ringbuffer_backend::RingBuffer;
-#[cfg(all(
-    feature = "backend-rtrb",
-    not(feature = "backend-ringbuffer"),
-    not(feature = "backend-ringbuf"),
-    not(feature = "backend-triple-buffer")
-))]
-pub(crate) use crate::rtrb_backend::RingBuffer;
+#[cfg(ticklog_split_ring)]
+pub(crate) use crate::rtrb_backend::{Registration as RingBuffer, RingProducer};
 #[cfg(all(
     feature = "backend-triple-buffer",
     not(feature = "backend-ringbuffer"),

@@ -167,7 +167,7 @@ mod error;
 mod format;
 mod guard;
 mod level;
-#[cfg(all(test, ticklog_loom))]
+#[cfg(all(test, ticklog_loom, not(feature = "fifo-backend")))]
 mod loom_tests;
 mod macros;
 mod record;
