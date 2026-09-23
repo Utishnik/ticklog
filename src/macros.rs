@@ -65,7 +65,10 @@ pub fn dispatch(
         let prof_ts = crate::hotpath::tick();
         let timestamp = timestamp::raw_timestamp();
         #[cfg(feature = "hotpath-profiler")]
-        crate::hotpath::add(crate::hotpath::L_TIMESTAMP, crate::hotpath::tick().wrapping_sub(prof_ts));
+        crate::hotpath::add(
+            crate::hotpath::L_TIMESTAMP,
+            crate::hotpath::tick().wrapping_sub(prof_ts),
+        );
         let flags = record::FLAG_SITE;
 
         #[cfg(not(feature = "fifo-backend"))]
@@ -74,24 +77,36 @@ pub fn dispatch(
             let prof_res = crate::hotpath::tick();
             if let Some(slot) = crate::thread_buf::reserve_with_policy(tb, total_size, policy) {
                 #[cfg(feature = "hotpath-profiler")]
-                crate::hotpath::add(crate::hotpath::L_RESERVE, crate::hotpath::tick().wrapping_sub(prof_res));
+                crate::hotpath::add(
+                    crate::hotpath::L_RESERVE,
+                    crate::hotpath::tick().wrapping_sub(prof_res),
+                );
                 #[cfg(feature = "hotpath-profiler")]
                 let prof_asm = crate::hotpath::tick();
                 record::assemble(
                     slot.ptr, level, timestamp, flags, site, n_args, total_size, write_args,
                 );
                 #[cfg(feature = "hotpath-profiler")]
-                crate::hotpath::add(crate::hotpath::L_ASSEMBLE, crate::hotpath::tick().wrapping_sub(prof_asm));
+                crate::hotpath::add(
+                    crate::hotpath::L_ASSEMBLE,
+                    crate::hotpath::tick().wrapping_sub(prof_asm),
+                );
                 #[cfg(feature = "hotpath-profiler")]
                 let prof_pub = crate::hotpath::tick();
                 tb.ring.publish(slot);
                 #[cfg(feature = "hotpath-profiler")]
-                crate::hotpath::add(crate::hotpath::L_PUBLISH, crate::hotpath::tick().wrapping_sub(prof_pub));
+                crate::hotpath::add(
+                    crate::hotpath::L_PUBLISH,
+                    crate::hotpath::tick().wrapping_sub(prof_pub),
+                );
                 #[cfg(feature = "hotpath-profiler")]
                 crate::hotpath::bump(crate::hotpath::C_CALLS);
             } else {
                 #[cfg(feature = "hotpath-profiler")]
-                crate::hotpath::add(crate::hotpath::L_RESERVE, crate::hotpath::tick().wrapping_sub(prof_res));
+                crate::hotpath::add(
+                    crate::hotpath::L_RESERVE,
+                    crate::hotpath::tick().wrapping_sub(prof_res),
+                );
                 #[cfg(feature = "hotpath-profiler")]
                 crate::hotpath::bump(crate::hotpath::C_DROPS);
             }
@@ -106,7 +121,10 @@ pub fn dispatch(
             let prof_res = crate::hotpath::tick();
             if let Some(slot) = tb.ring.reserve(total_size, policy) {
                 #[cfg(feature = "hotpath-profiler")]
-                crate::hotpath::add(crate::hotpath::L_RESERVE, crate::hotpath::tick().wrapping_sub(prof_res));
+                crate::hotpath::add(
+                    crate::hotpath::L_RESERVE,
+                    crate::hotpath::tick().wrapping_sub(prof_res),
+                );
                 let staging = &mut tb.staging;
                 staging.clear();
                 staging.resize(total_size, 0);
@@ -123,25 +141,37 @@ pub fn dispatch(
                     write_args,
                 );
                 #[cfg(feature = "hotpath-profiler")]
-                crate::hotpath::add(crate::hotpath::L_ASSEMBLE, crate::hotpath::tick().wrapping_sub(prof_asm));
+                crate::hotpath::add(
+                    crate::hotpath::L_ASSEMBLE,
+                    crate::hotpath::tick().wrapping_sub(prof_asm),
+                );
                 let _ = slot;
                 #[cfg(feature = "hotpath-profiler")]
                 let prof_pub = crate::hotpath::tick();
                 tb.ring.commit(staging);
                 #[cfg(feature = "hotpath-profiler")]
-                crate::hotpath::add(crate::hotpath::L_PUBLISH, crate::hotpath::tick().wrapping_sub(prof_pub));
+                crate::hotpath::add(
+                    crate::hotpath::L_PUBLISH,
+                    crate::hotpath::tick().wrapping_sub(prof_pub),
+                );
                 #[cfg(feature = "hotpath-profiler")]
                 crate::hotpath::bump(crate::hotpath::C_CALLS);
             } else {
                 #[cfg(feature = "hotpath-profiler")]
-                crate::hotpath::add(crate::hotpath::L_RESERVE, crate::hotpath::tick().wrapping_sub(prof_res));
+                crate::hotpath::add(
+                    crate::hotpath::L_RESERVE,
+                    crate::hotpath::tick().wrapping_sub(prof_res),
+                );
                 #[cfg(feature = "hotpath-profiler")]
                 crate::hotpath::bump(crate::hotpath::C_DROPS);
             }
         }
 
         #[cfg(feature = "hotpath-profiler")]
-        crate::hotpath::add(crate::hotpath::L_TOTAL, crate::hotpath::tick().wrapping_sub(prof_enter));
+        crate::hotpath::add(
+            crate::hotpath::L_TOTAL,
+            crate::hotpath::tick().wrapping_sub(prof_enter),
+        );
     });
 }
 
