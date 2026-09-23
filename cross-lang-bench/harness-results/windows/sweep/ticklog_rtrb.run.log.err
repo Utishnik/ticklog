@@ -1,5 +1,0 @@
-  single_int threads=1 ...
-
-thread 'ticklog-drain' (18280) panicked at C:\Users\Admin\Desktop\ticklog\src\rtrb_backend.rs:247:65:
-copy_from_slice: source slice length (4095) does not match destination slice length (1044480)
-note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

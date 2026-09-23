@@ -243,10 +243,10 @@ static ConfigResult measure_config(double ns_per_tick, Workload wl, int n_thread
 
     // Merge all per-thread slices into a single sorted vector.
     size_t total = 0;
-    for (const auto& sl : latencies) total += sl.size();
+    for (const auto& sl : latencies) total += sl.samples.size();
     std::vector<double> all;
     all.reserve(total);
-    for (const auto& sl : latencies) all.insert(all.end(), sl.begin(), sl.end());
+    for (const auto& sl : latencies) all.insert(all.end(), sl.samples.begin(), sl.samples.end());
     std::sort(all.begin(), all.end());
 
     if (all.empty()) {

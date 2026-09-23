@@ -238,13 +238,20 @@ impl RingBuffer {
         out.resize(before + available, 0);
         let mut written = 0;
         // rtrb: read chunk by chunk so whole ring chunks are moved together.
+        // A chunk may wrap the ring (as_slices -> a|b); copy each half into
+        // its own exact-length window. Request only the remaining room so a
+        // second iteration cannot write past `out`'s resize.
         loop {
-            match cons.read_chunk(available) {
+            let remaining = available - written;
+            if remaining == 0 {
+                break;
+            }
+            match cons.read_chunk(remaining) {
                 Err(_) => break,
                 Ok(chunk) => {
                     let (a, b) = chunk.as_slices();
                     let n = a.len() + b.len();
-                    out[before + written..before + written + n].copy_from_slice(a);
+                    out[before + written..before + written + a.len()].copy_from_slice(a);
                     if !b.is_empty() {
                         out[before + written + a.len()..before + written + n].copy_from_slice(b);
                     }
@@ -337,6 +344,28 @@ mod tests {
         let mut out = Vec::new();
         assert_eq!(rb.pop_available(&mut out), 6);
         assert_eq!(out, b"abcdef");
+        assert!(rb.is_empty());
+    }
+
+    #[test]
+    fn pop_available_handles_wrapped_chunk() {
+        // Regression: read_chunk may return a wrap (as_slices -> a|b with both
+        // halves non-empty). The old code copy_from_slice'd `a` into a window
+        // sized a.len()+b.len() and panicked.
+        let rb = RingBuffer::with_capacity(ROOM);
+        rb.set_chunk_size(1);
+        let first = vec![0xAAu8; 40];
+        rb.commit(&first);
+        let mut out = Vec::new();
+        assert_eq!(rb.pop_available(&mut out), 40);
+        assert_eq!(out, first);
+        // Second write starts near the physical end and wraps to the start.
+        let second = vec![0xBBu8; 40];
+        rb.reserve(second.len(), Backpressure::Drop).unwrap();
+        rb.commit(&second);
+        let mut wrapped = Vec::new();
+        assert_eq!(rb.pop_available(&mut wrapped), 40);
+        assert_eq!(wrapped, second);
         assert!(rb.is_empty());
     }
 
