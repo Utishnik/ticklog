@@ -22,6 +22,15 @@ use crate::level::Level;
 /// let file = File::create("app.log").unwrap();
 /// let sink = WriterSink::new(file);
 /// ```
+///
+/// Any writer implements [`LogSink`]; here a `Vec<u8>` stands in so the
+/// example runs without touching the filesystem:
+/// ```
+/// use ticklog::{Level, LogSink, WriterSink};
+///
+/// let mut sink = WriterSink::new(Vec::<u8>::new());
+/// sink.accept(b"hello", Level::Info).unwrap();
+/// ```
 pub struct WriterSink<W> {
     writer: W,
 }

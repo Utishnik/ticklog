@@ -309,10 +309,40 @@ impl RingProducer {
     /// Must be called after [`reserve`](Self::reserve) succeeds. `reserve`
     /// guaranteed the staged bytes + the new record together fit the ring, so
     /// the chunk flush never fails.
+    ///
+    /// With the default `chunk_size = 1` (and any batch where this record
+    /// alone completes a chunk with nothing yet staged) the record is written
+    /// straight into the ring chunk and the staging `Vec` is never touched,
+    /// sparing one buffer memcpy per record.
     pub(crate) fn commit(&mut self, bytes: &[u8]) {
+        let chunk_size = self.chunk_size.max(1);
+        // Direct path: nothing staged, and this record completes a chunk.
+        // `staged` empty implies `staged_records == 0`, so this is exactly
+        // `chunk_size == 1` — the common configuration.
+        if self.staged.is_empty() && chunk_size == 1 {
+            if !bytes.is_empty() {
+                // SAFETY: `reserve` verified `bytes.len()` bytes of room (the
+                // staged byte count is zero, so `needed == total_size`) and
+                // rtrb keeps one slot of slack, so `write_chunk` can never
+                // fail.
+                let mut wchunk = self
+                    .prod
+                    .write_chunk(bytes.len())
+                    .expect("ticklog direct flush: reserve promised room");
+                {
+                    let (a, b) = wchunk.as_mut_slices();
+                    a.copy_from_slice(&bytes[..a.len()]);
+                    if !b.is_empty() {
+                        b.copy_from_slice(&bytes[a.len()..]);
+                    }
+                }
+                wchunk.commit_all();
+            }
+            return;
+        }
         self.staged.extend_from_slice(bytes);
         self.staged_records += 1;
-        if self.staged_records >= self.chunk_size.max(1) {
+        if self.staged_records >= chunk_size {
             let to_flush = self.staged.len();
             if to_flush > 0 {
                 // SAFETY: `reserve` verified `staged.len()` bytes of room and
@@ -452,6 +482,59 @@ mod tests {
         let mut out = Vec::new();
         assert_eq!(registration.pop_available(&mut out), 6);
         assert_eq!(out, b"abcdef");
+        assert!(registration.is_empty());
+    }
+
+    #[test]
+    fn chunk_size_one_commits_directly_without_staging() {
+        // Default chunk_size = 1 means every commit takes the direct path: the
+        // record goes straight into an rtrb chunk and the staging Vec is never
+        // touched. Staged state must stay empty across direct commits.
+        let (mut producer, registration) = split(CAP);
+        producer.set_chunk_size(1);
+        producer.commit(b"abc");
+        assert!(producer.staged.is_empty());
+        assert_eq!(producer.staged_records, 0);
+        producer.commit(b"def");
+        assert!(producer.staged.is_empty());
+        assert_eq!(producer.staged_records, 0);
+        let mut out = Vec::new();
+        assert_eq!(registration.pop_available(&mut out), 6);
+        assert_eq!(out, b"abcdef");
+        assert!(registration.is_empty());
+    }
+
+    #[test]
+    fn direct_commit_respects_reserve_capacity() {
+        // The direct path must honor reserve's accounting exactly like the
+        // staged path: two payloads of ROOM-2 cannot both fit a ROOM ring, so
+        // the second reserve refuses under Drop.
+        let (mut producer, registration) = split(ROOM);
+        producer.set_chunk_size(1);
+        let payload = vec![0u8; ROOM - 2];
+        let _slot = producer.reserve(payload.len(), Backpressure::Drop).unwrap();
+        producer.commit(&payload);
+        assert!(producer.reserve(1, Backpressure::Drop).is_none());
+        let mut out = Vec::new();
+        assert_eq!(registration.pop_available(&mut out), ROOM - 2);
+        assert!(registration.is_empty());
+    }
+
+    #[test]
+    fn direct_and_staged_commits_interleave() {
+        // Changing chunk_size mid-stream mixes direct (chunk_size 1) and
+        // staged (chunk_size 2) commits; bytes must arrive in commit order.
+        let (mut producer, registration) = split(CAP);
+        producer.set_chunk_size(1);
+        producer.commit(b"aa"); // direct path
+        producer.set_chunk_size(2);
+        producer.commit(b"bb"); // staged, 1 of 2
+        assert!(!producer.staged.is_empty());
+        producer.commit(b"cc"); // staged flush, 2 of 2
+        assert!(producer.staged.is_empty());
+        let mut out = Vec::new();
+        assert_eq!(registration.pop_available(&mut out), 6);
+        assert_eq!(out, b"aabbcc");
         assert!(registration.is_empty());
     }
 

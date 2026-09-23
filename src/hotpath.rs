@@ -82,3 +82,61 @@ pub fn bump(lane: usize) {
 pub fn take() -> [u64; LANES] {
     TLS.with(|c| c.replace([0u64; LANES]))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lane_constants_are_distinct_and_in_range() {
+        let mut seen = [false; LANES];
+        let lanes = [
+            L_TOTAL,
+            L_TIMESTAMP,
+            L_RESERVE,
+            L_ASSEMBLE,
+            L_PUBLISH,
+            L_COLD_CONFIRM,
+            C_CALLS,
+            C_DROPS,
+        ];
+        for l in lanes {
+            assert!(l < LANES, "lane {l} out of range");
+            assert!(!seen[l], "lane {l} duplicated");
+            seen[l] = true;
+        }
+        assert_eq!(LANE_NAMES.len(), LANES);
+        for (i, name) in LANE_NAMES.iter().enumerate() {
+            assert!(!name.is_empty(), "lane {i} has no name");
+        }
+    }
+
+    #[test]
+    fn take_starts_zeroed() {
+        assert_eq!(take(), [0; LANES]);
+    }
+
+    #[test]
+    fn add_and_bump_reflect_when_enabled() {
+        // Without the feature every call is a no-op; with it the deltas
+        // accumulate into the caller's lane. Either way `take` re-zeroes.
+        let _before = take();
+        for lane in 0..LANES {
+            bump(lane);
+            add(lane, 7);
+        }
+        let after = take();
+        for (lane, value) in after.iter().enumerate() {
+            let expected = if ENABLED { 8 } else { 0 };
+            assert_eq!(*value, expected, "lane {lane}");
+        }
+        assert_eq!(take(), [0; LANES]);
+    }
+
+    #[test]
+    fn tick_is_zero_when_disabled() {
+        if !ENABLED {
+            assert_eq!(tick(), 0);
+        }
+    }
+}

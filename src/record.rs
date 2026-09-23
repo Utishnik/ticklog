@@ -129,41 +129,43 @@ pub(crate) fn assemble(
     debug_assert!(total_size <= MAX_RECORD_SIZE);
 
     // SAFETY: The caller guarantees `dst` points to `total_size` writable
-    // bytes. Every one of those bytes is written by the `put!`
-    // header/section stores and the caller's `write_args` closure, so no
-    // uninitialized byte is ever read. The caller's documented contract
-    // guarantees `write_args` fills exactly the tags + payloads region.
+    // bytes. Every one of those bytes is written by the stores below and the
+    // caller's `write_args` closure, so no uninitialized byte is ever read.
+    // The caller's documented contract guarantees `write_args` fills exactly
+    // the tags + payloads region.
     unsafe {
         let buf = std::slice::from_raw_parts_mut(dst, total_size);
-        let mut pos = 0usize;
+        // Every byte offset below is < total_size (>= HEADER_SIZE + 8 in the
+        // site-layout fast path the macros always use), so each unaligned
+        // 8-byte window lands inside `buf`. All pointers are derived from
+        // `buf`, so no second provenance aliases it for the drain to trip on.
+        let p = buf.as_mut_ptr();
 
-        // Writes `$bytes` (a little-endian `[u8; N]`) at `pos` and advances by
-        // its own length, so field widths come from the encoding, never a literal.
-        macro_rules! put {
-            ($bytes:expr) => {{
-                let b = $bytes;
-                buf[pos..pos + b.len()].copy_from_slice(&b);
-                pos += b.len();
-            }};
-        }
-
-        // Header
-        put!([VERSION]);
-        put!([LOG_RECORD]);
-        put!(total.to_le_bytes());
-        put!([level_u8]);
-        put!(flags.to_le_bytes());
-        put!([0u8]); // _pad
-        put!(timestamp.to_le_bytes());
+        // Header, field-packed into two u64 stores instead of seven per-field
+        // copies (layout: version u8 | type u8 | total_size u16 | level u8 |
+        // flags u16 | _pad u8 | timestamp u64, all little-endian).
+        let header0 = (VERSION as u64)
+            | ((LOG_RECORD as u64) << 8)
+            | ((total as u64) << 16)
+            | ((level_u8 as u64) << 32)
+            | ((flags as u64) << 40);
+        std::ptr::write_unaligned(p.cast::<u64>(), header0.to_le());
+        std::ptr::write_unaligned(p.add(8).cast::<u64>(), timestamp.to_le());
+        let mut pos = 16usize;
 
         // Site section: the accepted fast path. The drain dereferences the
         // pointer to the promoted call-site descriptor for fmt/file/line.
         if flags & FLAG_SITE != 0 {
-            put!((site as *const Site as u64).to_le_bytes());
+            std::ptr::write_unaligned(
+                p.add(pos).cast::<u64>(),
+                (site as *const Site as u64).to_le(),
+            );
+            pos += 8;
         }
 
         // Count byte
-        put!([n_args]);
+        *p.add(pos) = n_args;
+        pos += 1;
 
         // Delegate to the monomorphized closure for tags + payloads.
         write_args(&mut buf[pos..]);
@@ -259,6 +261,41 @@ mod tests {
         assert_eq!(read_u16(&buf, 5), FLAG_SITE);
         assert_eq!(buf[7], 0);
         assert_eq!(read_u64(&buf, 8), 0xABCD);
+    }
+
+    #[test]
+    fn header_packed_first_word_is_byte_exact() {
+        // Exercises the two-u64 packing: every byte of the first header word
+        // derives from a distinct field, so a wrong shift or OR would show up
+        // exactly here. A flag word with both LE bytes non-zero is only
+        // reachable by driving `assemble` directly (the flag constants all fit
+        // the low byte).
+        let flags = 0x12ABu16; // includes FLAG_SITE so the site section runs
+        let total_size = HEADER_SIZE + SITE_SECTION_SIZE + COUNT_SIZE;
+        let mut buf = vec![0u8; total_size];
+        assemble(
+            buf.as_mut_ptr(),
+            Level::Debug,
+            0x0203_0405_0607_0809,
+            flags,
+            SITE,
+            0,
+            total_size,
+            |_| {},
+        );
+
+        let total = buf.len() as u16;
+        assert_eq!(buf[0], VERSION);
+        assert_eq!(buf[1], LOG_RECORD);
+        assert_eq!(buf[2], total.to_le_bytes()[0]);
+        assert_eq!(buf[3], total.to_le_bytes()[1]);
+        assert_eq!(buf[4], Level::Debug.to_u8());
+        assert_eq!(buf[5], 0xAB); // flags low byte
+        assert_eq!(buf[6], 0x12); // flags high byte
+        assert_eq!(buf[7], 0x00); // _pad
+        assert_eq!(read_u64(&buf, 8), 0x0203_0405_0607_0809);
+        assert_eq!(read_u64(&buf, 16), SITE as *const Site as u64);
+        assert_eq!(buf[24], 0); // count byte right after the site section
     }
 
     #[test]
