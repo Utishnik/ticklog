@@ -1,5 +1,5 @@
 # Fetched third-party sources
-cpp/quill/build/
+cpp/quill/build*/
 cpp/quill/quill/
 cpp/nanolog/build/
 cpp/nanolog/NanoLog/
