@@ -31,6 +31,9 @@ policy-fast = ["policy-quill", "ticklog/fast-tail-cache"]
 policy-watermark = ["policy-quill", "ticklog/watermark-head"]
 # Fast-tail-cache + watermark-batched publish combined.
 policy-fastwm = ["policy-fast", "ticklog/watermark-head"]
+# Hot-path cycle profiler: per-stage rdtsc breakdown written to stderr after
+# every config.
+hotpath-profiler = ["ticklog/hotpath-profiler"]
 
 [profile.release]
 lto = "fat"

@@ -735,10 +735,17 @@ mod custom {
             let mut backoff = crate::backoff::Backoff::new();
             loop {
                 core::hint::cold_path();
+                #[cfg(feature = "hotpath-profiler")]
+                let prof_cold = crate::hotpath::tick();
                 // Refresh from the drain. Acquire pairs with the drain's Release
                 // store of `tail`, so a freed slot's reads complete before the
                 // producer reuses it.
                 let tail = self.tail().load(Ordering::Acquire);
+                #[cfg(feature = "hotpath-profiler")]
+                crate::hotpath::add(
+                    crate::hotpath::L_COLD_CONFIRM,
+                    crate::hotpath::tick().wrapping_sub(prof_cold),
+                );
                 // SAFETY: producer-private, as above.
                 unsafe { *self.tail_cache() = tail };
                 if head.wrapping_add(needed).wrapping_sub(tail) <= self.mask() {

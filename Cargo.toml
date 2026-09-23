@@ -54,6 +54,13 @@ fast-tail-cache = []
 # configuration.
 watermark-head = []
 
+# Benchmark-only: hot-path cycle profiler. Every producer log call records
+# rdtsc deltas per stage (timestamp / reserve / assemble / publish /
+# cold-confirm) into a thread-local array read back by the bench harness.
+# `dispatch` and `reserve` compile the hooks in; without this feature they are
+# absent from the hot path entirely. Not part of the default configuration.
+hotpath-profiler = []
+
 [dev-dependencies]
 criterion = {version = "0.5", features = ["html_reports"]}
 env_logger = "0.11"

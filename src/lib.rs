@@ -166,6 +166,7 @@ mod encode;
 mod error;
 mod format;
 mod guard;
+pub mod hotpath;
 mod level;
 #[cfg(all(test, ticklog_loom, not(feature = "fifo-backend")))]
 mod loom_tests;
@@ -205,6 +206,7 @@ pub mod __private {
     pub use crate::builder::__configure_rt;
     pub use crate::encode::LoggableArgs;
     pub use crate::format::check_fmt;
+    pub use crate::hotpath;
     pub use crate::macros::dispatch;
     pub use crate::record::BASE_RECORD_SIZE;
     pub use crate::ring::DEFAULT_RING_SIZE;

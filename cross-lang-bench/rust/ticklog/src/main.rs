@@ -277,20 +277,36 @@ fn measure_config(cfg: &Config, workload: Workload, n_threads: usize) -> ConfigR
 
             }
 
-            latencies
+            let prof = if cfg!(feature = "hotpath-profiler") {
+                ticklog::__private::hotpath::take()
+            } else {
+                [0u64; ticklog::__private::hotpath::LANES]
+            };
+
+            (latencies, prof)
         }));
     }
 
-    // Collect per-thread latency vectors.
+    // Collect per-thread latency vectors and merge hot-path counters.
     let mut all_latencies = Vec::with_capacity(samples);
+    let mut hot: [u64; 8] = [0; 8];
     for h in handles {
         match h.join() {
-            Ok(v) => all_latencies.extend(v),
+            Ok((v, prof)) => {
+                all_latencies.extend(v);
+                for i in 0..8 {
+                    hot[i] += prof[i];
+                }
+            }
             Err(_) => {
                 eprintln!("ticklog harness: thread panicked");
                 process::exit(1);
             }
         }
+    }
+
+    if cfg!(feature = "hotpath-profiler") {
+        emit_hotpath_report(workload, n_threads, &hot, cfg.samples, cfg.ns_per_tick);
     }
 
     let wall_duration_s = wall_start.elapsed().as_secs_f64();
@@ -320,6 +336,37 @@ fn measure_config(cfg: &Config, workload: Workload, n_threads: usize) -> ConfigR
 fn round2(x: f64) -> f64 {
     (x * 100.0).round() / 100.0
 }
+
+/// Print per-stage hot-path cycle breakdown for one config to stderr.
+#[cfg(feature = "hotpath-profiler")]
+fn emit_hotpath_report(
+    workload: Workload,
+    n_threads: usize,
+    hot: &[u64; 8],
+    samples: usize,
+    ns_per_tick: f64,
+) {
+    use ticklog::__private::hotpath::{LANE_NAMES, L_COLD_CONFIRM, L_RESERVE, L_TIMESTAMP, L_ASSEMBLE, L_PUBLISH, L_TOTAL};
+    let calls = hot[6].max(1);
+    let per_call = |lane: usize| -> f64 { hot[lane] as f64 / calls as f64 * ns_per_tick };
+    eprintln!(
+        "  [hotpath] {} threads={} calls={} total={:.2}ns ts={:.2} reserve={:.2} assemble={:.2} publish={:.2} cold={:.2} drops={}",
+        workload.name(),
+        n_threads,
+        calls,
+        per_call(L_TOTAL),
+        per_call(L_TIMESTAMP),
+        per_call(L_RESERVE),
+        per_call(L_ASSEMBLE),
+        per_call(L_PUBLISH),
+        per_call(L_COLD_CONFIRM),
+        hot[7],
+    );
+    let _ = (LANE_NAMES, L_TIMESTAMP, L_ASSEMBLE, L_PUBLISH, L_RESERVE, L_COLD_CONFIRM, L_TOTAL);
+}
+
+#[cfg(not(feature = "hotpath-profiler"))]
+fn emit_hotpath_report(_workload: Workload, _n_threads: usize, _hot: &[u64; 8], _samples: usize, _ns_per_tick: f64) {}
 
 // CLI config
 struct Config {
