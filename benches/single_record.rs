@@ -45,12 +45,25 @@ fn main() {
     // reserve-fails are what let a lagging drain make a producer bench look
     // fast while delivering nothing.
     if cfg!(feature = "hotpath-profiler") {
-        let p = ticklog::__private::hotpath::take();
-        let calls = p[ticklog::__private::hotpath::C_CALLS];
-        let drops = p[ticklog::__private::hotpath::C_DROPS];
+        use ticklog::__private::hotpath as hp;
+        let p = hp::take();
+        let calls = p[hp::C_CALLS];
+        let drops = p[hp::C_DROPS];
         eprintln!(
             "PROF calls={calls} drops={drops} (drop rate {:.1}%)",
             100.0 * drops as f64 / (calls + drops).max(1) as f64
         );
+        let total = p[hp::L_TOTAL].max(1);
+        for (i, name) in hp::LANE_NAMES.iter().enumerate() {
+            if *name == "calls" || *name == "drops" {
+                continue;
+            }
+            eprintln!(
+                "  lane {name:<12} {:>16} ticks  {:>6.1}%  {:>10.1} ticks/call",
+                p[i],
+                100.0 * p[i] as f64 / total as f64,
+                p[i] as f64 / calls.max(1) as f64,
+            );
+        }
     }
 }
