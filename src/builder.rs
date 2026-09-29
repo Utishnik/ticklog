@@ -172,6 +172,9 @@ macro_rules! configure {
 /// claims the ring registry, and (for the segmented policies) builds the
 /// arena-backed buffer pool.
 #[doc(hidden)]
+// Under `fifo-backend` nothing probes the sink here (the segmented block is
+// not compiled), so `mut sink` is only needed on the crate-local ring path.
+#[cfg_attr(feature = "fifo-backend", allow(unused_mut))]
 pub fn __configure_rt(
     mut sink: Box<dyn LogSink>,
     timezone_offset: i32,

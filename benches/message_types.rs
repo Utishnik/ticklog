@@ -1,18 +1,10 @@
 //! Encode cost per `Loggable` argument type: empty (fixed overhead),
-//! u64, f64, bool, &str, and a mixed multi-arg record.
+//! u64, f64, bool, &str, and a mixed multi-arg record. The sink is the
+//! crate's raw fast path (`ticklog::NullSink`), so the drain adds no
+//! decoding or rendering to the measured pipeline.
 
-use std::io;
-
-use criterion::{Criterion, criterion_group, criterion_main};
-use ticklog::{Level, LogSink, info};
-
-struct NullSink;
-
-impl LogSink for NullSink {
-    fn accept(&mut self, _line: &[u8], _level: Level) -> io::Result<()> {
-        Ok(())
-    }
-}
+use criterion::{Criterion, criterion_group};
+use ticklog::{Level, NullSink, info};
 
 fn bench_message_types(c: &mut Criterion) {
     let guard = ticklog::configure! {
@@ -61,4 +53,10 @@ criterion_group! {
         .sample_size(200);
     targets = bench_message_types
 }
-criterion_main!(benches);
+
+// Report provider: with the `hotpath/hotpath` feature this prints the
+// per-function hot-path report on exit; without it the macro is a no-op.
+#[hotpath::main]
+fn main() {
+    benches();
+}

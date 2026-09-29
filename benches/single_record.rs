@@ -1,22 +1,13 @@
 //! Producer hot-path latency of a single `info!` call, isolated from
-//! the drain by a null sink.
+//! the drain by the crate's raw fast path: `ticklog::NullSink` opts into
+//! `RawLogSink`, so the drain thread only validates records and advances
+//! the tail — no decoding, no rendering, no sink work.
 
 #[path = "common/affinity.rs"]
 mod affinity;
 
-use std::io;
-
-use criterion::{Criterion, criterion_group, criterion_main};
-use ticklog::{Level, LogSink, info};
-
-/// Discards every record with no work, so the measured time is the producer's.
-struct NullSink;
-
-impl LogSink for NullSink {
-    fn accept(&mut self, _line: &[u8], _level: Level) -> io::Result<()> {
-        Ok(())
-    }
-}
+use criterion::{Criterion, criterion_group};
+use ticklog::{Level, NullSink, info};
 
 fn bench_single_record(c: &mut Criterion) {
     affinity::pin_producer_from_env();
@@ -43,4 +34,22 @@ criterion_group! {
         .sample_size(200);
     targets = bench_single_record
 }
-criterion_main!(benches);
+
+// Report provider: with the `hotpath/hotpath` feature this prints the
+// per-function hot-path report on exit; without it the macro is a no-op.
+#[hotpath::main]
+fn main() {
+    benches();
+    // Drop-rate probe under the crate's low-overhead `hotpath-profiler`:
+    // reserve-fails are what let a lagging drain make a producer bench look
+    // fast while delivering nothing.
+    if cfg!(feature = "hotpath-profiler") {
+        let p = ticklog::__private::hotpath::take();
+        let calls = p[ticklog::__private::hotpath::C_CALLS];
+        let drops = p[ticklog::__private::hotpath::C_DROPS];
+        eprintln!(
+            "PROF calls={calls} drops={drops} (drop rate {:.1}%)",
+            100.0 * drops as f64 / (calls + drops).max(1) as f64
+        );
+    }
+}

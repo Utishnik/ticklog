@@ -20,10 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Overflow::DropOldest`), both wired through the raw fast path. Reads go
   through the clonable `InMemoryHandle`.
 - `#[hotpath::measure]` annotations on the producer and drain hot path
-  (`dispatch`, `ring::reserve`, `ring::publish`, `drain::poll_once`,
-  `drain_ring_inner`, the FIFO `drain_ring`, `decode_and_format`,
-  `render_pattern`). The annotations are zero-cost unless the consumer turns
-  on the `hotpath/hotpath` feature.
+  (`dispatch`, `with_thread_buf`, `record::assemble`, `ring::reserve`,
+  `ring::publish`, `rtrb_backend::{reserve, commit, pop_available}`,
+  `drain::poll_once`, `drain_ring_inner`, the FIFO `drain_ring`,
+  `decode_and_format`, `render_pattern`). The annotations are zero-cost
+  unless the consumer turns on the `hotpath/hotpath` feature.
 
 ## [0.1.2] - 2026-09-11
 

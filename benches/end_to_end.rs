@@ -5,7 +5,7 @@ use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{Criterion, Throughput, criterion_group};
 use ticklog::{Level, LogSink, info};
 
 /// Counts delivered records and runs formatted bytes through `black_box`.
@@ -67,4 +67,12 @@ criterion_group! {
         .sample_size(50);
     targets = bench_end_to_end
 }
-criterion_main!(benches);
+
+// Report provider: with the `hotpath/hotpath` feature this prints the
+// per-function hot-path report on exit; without it the macro is a no-op.
+// `end_to_end` keeps the formatted path (CountingSink has no `raw_sink`),
+// so the report covers the rendering stages the raw benches skip.
+#[hotpath::main]
+fn main() {
+    benches();
+}

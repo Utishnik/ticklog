@@ -112,6 +112,7 @@ pub struct Site {
 // assembler; bundling them into a struct would add indirection at the single
 // call site without making anything clearer.
 #[allow(clippy::too_many_arguments)]
+#[hotpath::measure]
 #[inline]
 pub(crate) fn assemble(
     dst: *mut u8,

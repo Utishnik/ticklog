@@ -136,6 +136,7 @@ pub(crate) struct RingConsumer {
 impl RingConsumer {
     /// Moves every available ring byte into `out`, returning how many were
     /// moved. Called by the drain; never invoked by the producer.
+    #[hotpath::measure]
     fn pop_available(&mut self, out: &mut Vec<u8>) -> usize {
         if self.cons.is_empty() {
             return 0;
@@ -266,6 +267,7 @@ impl RingProducer {
     /// commit time. Under [`Backpressure::Drop`] returns `None` when the
     /// producer cannot flush its staged chunk + the new record; under
     /// [`Backpressure::Block`] (and the segmented policies, degraded) spins.
+    #[hotpath::measure]
     pub(crate) fn reserve(
         &mut self,
         total_size: usize,
@@ -314,6 +316,7 @@ impl RingProducer {
     /// alone completes a chunk with nothing yet staged) the record is written
     /// straight into the ring chunk and the staging `Vec` is never touched,
     /// sparing one buffer memcpy per record.
+    #[hotpath::measure]
     pub(crate) fn commit(&mut self, bytes: &[u8]) {
         let chunk_size = self.chunk_size.max(1);
         // Direct path: nothing staged, and this record completes a chunk.
