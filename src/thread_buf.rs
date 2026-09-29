@@ -43,10 +43,11 @@ pub(crate) struct ThreadBuf {
     /// Cached thread name. Falls back to `<unnamed>` when the OS thread has no name.
     #[cfg_attr(feature = "fifo-backend", allow(dead_code))]
     pub(crate) thread_name: String,
-    /// Reusable staging buffer for backend-record byte pushes. Seeded to
+    /// Reusable assembly scratch for the FIFO backends: a record is written
+    /// here without zero-filling and pushed once (the rtrb backend only needs
+    /// it for wrapped or batched chunks). Seeded to
     /// [`MAX_RECORD_SIZE`](crate::record::MAX_RECORD_SIZE) so the first log
-    /// after [`warm_up`] never reallocates on the caller. Only the
-    /// experimental FIFO backends write records this way.
+    /// after [`warm_up`] never reallocates on the caller.
     #[cfg(feature = "fifo-backend")]
     pub(crate) staging: Vec<u8>,
 }

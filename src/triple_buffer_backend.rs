@@ -180,6 +180,34 @@ impl RingBuffer {
         input.publish();
     }
 
+    /// Assembles the record through `f` into `scratch` (without zero-filling)
+    /// and publishes it as the single outstanding value via
+    /// [`commit`](Self::commit).
+    ///
+    /// Must follow a successful [`reserve`](Self::reserve) so the previous
+    /// value is already consumed. `f` receives `len` writable bytes and must
+    /// initialize all of them (the [`record::assemble`](crate::record::assemble)
+    /// contract).
+    #[hotpath::measure]
+    pub(crate) fn write_record(&self, len: usize, scratch: &mut Vec<u8>, f: impl FnOnce(*mut u8)) {
+        #[cfg(feature = "hotpath-profiler")]
+        let prof_asm = crate::hotpath::tick();
+        crate::record::fill_scratch(scratch, len, f);
+        #[cfg(feature = "hotpath-profiler")]
+        crate::hotpath::add(
+            crate::hotpath::L_ASSEMBLE,
+            crate::hotpath::tick().wrapping_sub(prof_asm),
+        );
+        #[cfg(feature = "hotpath-profiler")]
+        let prof_pub = crate::hotpath::tick();
+        self.commit(scratch);
+        #[cfg(feature = "hotpath-profiler")]
+        crate::hotpath::add(
+            crate::hotpath::L_PUBLISH,
+            crate::hotpath::tick().wrapping_sub(prof_pub),
+        );
+    }
+
     /// Copies the latest published value (if any) into `out`, returning how
     /// many bytes were copied.
     ///
@@ -222,6 +250,25 @@ mod tests {
         let slot = rb.reserve(5, Backpressure::Drop).unwrap();
         assert!(slot.ptr.is_null());
         rb.commit(b"hello");
+        let mut out = Vec::new();
+        assert_eq!(rb.pop_available(&mut out), 5);
+        assert_eq!(out, b"hello");
+        assert!(rb.is_empty());
+    }
+
+    #[test]
+    fn write_record_assembles_into_scratch_and_delivers() {
+        let rb = RingBuffer::with_capacity(crate::ring::DEFAULT_RING_SIZE);
+        rb.reserve(5, Backpressure::Drop).unwrap();
+        // Deliberately capacity-0: `write_record` must grow the scratch itself.
+        let mut scratch = Vec::new();
+        rb.write_record(5, &mut scratch, |ptr| {
+            // SAFETY: `write_record` handed 5 writable bytes.
+            unsafe {
+                std::ptr::copy_nonoverlapping(b"hello".as_ptr(), ptr, 5);
+            }
+        });
+        assert_eq!(&scratch[..], b"hello");
         let mut out = Vec::new();
         assert_eq!(rb.pop_available(&mut out), 5);
         assert_eq!(out, b"hello");

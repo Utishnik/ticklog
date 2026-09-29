@@ -21,10 +21,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through the clonable `InMemoryHandle`.
 - `#[hotpath::measure]` annotations on the producer and drain hot path
   (`dispatch`, `with_thread_buf`, `record::assemble`, `ring::reserve`,
-  `ring::publish`, `rtrb_backend::{reserve, commit, pop_available}`,
-  `drain::poll_once`, `drain_ring_inner`, the FIFO `drain_ring`,
-  `decode_and_format`, `render_pattern`). The annotations are zero-cost
-  unless the consumer turns on the `hotpath/hotpath` feature.
+  `ring::publish`, `rtrb_backend::{reserve, commit, write_record,
+  pop_available}`, the FIFO backends' `write_record`, `drain::poll_once`,
+  `drain_ring_inner`, the FIFO `drain_ring`, `decode_and_format`,
+  `render_pattern`). The annotations are zero-cost unless the consumer turns
+  on the `hotpath/hotpath` feature.
+
+### Changed
+
+- The FIFO producer path neither zero-fills the thread staging buffer nor
+  copies staging into the ring: the dispatch macro hands `total_size` and a
+  record-writing closure to the new `RingBuffer::write_record`, which lets
+  each backend assemble the bytes exactly where they will be published
+  (straight into the rtrb chunk, straight into its staged chunk, or into the
+  thread scratch for the byte-FIFO backends) and push once. The committed
+  bytes, the reserve/commit semantics, and the Drop/Block behaviour are
+  unchanged; `commit(&[u8])` remains as the byte-slice interface used by
+  tests.
 
 ## [0.1.2] - 2026-09-11
 

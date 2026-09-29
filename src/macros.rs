@@ -115,46 +115,24 @@ pub fn dispatch(
 
         #[cfg(feature = "fifo-backend")]
         {
-            // Stage the record in the thread's scratch buffer, then commit it
-            // to the ringbuffer-crate FIFO in one atomic mutex section. The
-            // mutex makes the whole record visible to the drain at once.
+            // The backend places the record with as few memory passes as its
+            // layout allows: it assembles the bytes straight into the ring
+            // chunk (rtrb direct), straight into its staged chunk, or into the
+            // thread scratch for the byte-FIFO backends — never zero-filling,
+            // never copying staging into the ring a second time.
             #[cfg(feature = "hotpath-profiler")]
             let prof_res = crate::hotpath::tick();
-            if let Some(slot) = tb.ring.reserve(total_size, policy) {
+            if let Some(_slot) = tb.ring.reserve(total_size, policy) {
                 #[cfg(feature = "hotpath-profiler")]
                 crate::hotpath::add(
                     crate::hotpath::L_RESERVE,
                     crate::hotpath::tick().wrapping_sub(prof_res),
                 );
-                let staging = &mut tb.staging;
-                staging.clear();
-                staging.resize(total_size, 0);
-                #[cfg(feature = "hotpath-profiler")]
-                let prof_asm = crate::hotpath::tick();
-                record::assemble(
-                    staging.as_mut_ptr(),
-                    level,
-                    timestamp,
-                    flags,
-                    site,
-                    n_args,
-                    total_size,
-                    write_args,
-                );
-                #[cfg(feature = "hotpath-profiler")]
-                crate::hotpath::add(
-                    crate::hotpath::L_ASSEMBLE,
-                    crate::hotpath::tick().wrapping_sub(prof_asm),
-                );
-                let _ = slot;
-                #[cfg(feature = "hotpath-profiler")]
-                let prof_pub = crate::hotpath::tick();
-                tb.ring.commit(staging);
-                #[cfg(feature = "hotpath-profiler")]
-                crate::hotpath::add(
-                    crate::hotpath::L_PUBLISH,
-                    crate::hotpath::tick().wrapping_sub(prof_pub),
-                );
+                tb.ring.write_record(total_size, &mut tb.staging, |ptr| {
+                    record::assemble(
+                        ptr, level, timestamp, flags, site, n_args, total_size, write_args,
+                    );
+                });
                 #[cfg(feature = "hotpath-profiler")]
                 crate::hotpath::bump(crate::hotpath::C_CALLS);
             } else {

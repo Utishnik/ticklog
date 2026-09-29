@@ -316,6 +316,11 @@ impl RingProducer {
     /// alone completes a chunk with nothing yet staged) the record is written
     /// straight into the ring chunk and the staging `Vec` is never touched,
     /// sparing one buffer memcpy per record.
+    ///
+    /// Production assembles through [`write_record`](Self::write_record),
+    /// which commits the same bytes with fewer memory passes; this byte-slice
+    /// form remains for the tests.
+    #[allow(dead_code)] // production writes via `write_record`
     #[hotpath::measure]
     pub(crate) fn commit(&mut self, bytes: &[u8]) {
         let chunk_size = self.chunk_size.max(1);
@@ -365,6 +370,135 @@ impl RingProducer {
                 wchunk.commit_all();
                 self.staged.clear();
                 self.staged_records = 0;
+            }
+        }
+    }
+
+    /// Writes a record produced by `f` into the ring, choosing the placement
+    /// that needs the fewest memory passes for the current chunk state.
+    ///
+    /// Must be called after [`reserve`](Self::reserve) succeeds with `len`
+    /// bytes — the same guarantee [`commit`](Self::commit) relies on. `f`
+    /// receives a pointer to `len` writable bytes and must initialize every
+    /// one of them (the [`record::assemble`](crate::record::assemble)
+    /// contract), so nothing is zero-filled and the bytes committed are
+    /// identical to [`commit`](Self::commit)'s.
+    ///
+    /// Direct chunk (`staged` empty, `chunk_size == 1`): with an unwrapped
+    /// write the record is assembled *in the ring itself* — no scratch and no
+    /// record-sized memcpy; a wrapped write chunk assembles into `scratch`
+    /// and split-copies. Batched chunks (`chunk_size > 1`) assemble straight
+    /// into the `staged` chunk, skipping the staging → staged copy.
+    #[hotpath::measure]
+    pub(crate) fn write_record(
+        &mut self,
+        len: usize,
+        scratch: &mut Vec<u8>,
+        f: impl FnOnce(*mut u8),
+    ) {
+        let chunk_size = self.chunk_size.max(1);
+        // Direct path: nothing staged, and this record completes a chunk.
+        // `staged` empty implies `staged_records == 0`, so this is exactly
+        // `chunk_size == 1` — the common configuration.
+        if self.staged.is_empty() && chunk_size == 1 {
+            if len > 0 {
+                // SAFETY: `reserve` verified `len` bytes of room (the staged
+                // byte count is zero, so `needed == len`) and rtrb keeps one
+                // slot of slack, so `write_chunk` can never fail.
+                let mut wchunk = self
+                    .prod
+                    .write_chunk(len)
+                    .expect("ticklog direct flush: reserve promised room");
+                let (a, b) = wchunk.as_mut_slices();
+                #[cfg(feature = "hotpath-profiler")]
+                let prof_asm = crate::hotpath::tick();
+                if b.is_empty() {
+                    // Unwrapped: `f` writes straight into the ring — no
+                    // scratch staging and no record-sized memcpy.
+                    f(a.as_mut_ptr());
+                    #[cfg(feature = "hotpath-profiler")]
+                    crate::hotpath::add(
+                        crate::hotpath::L_ASSEMBLE,
+                        crate::hotpath::tick().wrapping_sub(prof_asm),
+                    );
+                    #[cfg(feature = "hotpath-profiler")]
+                    let prof_pub = crate::hotpath::tick();
+                    wchunk.commit_all();
+                    #[cfg(feature = "hotpath-profiler")]
+                    crate::hotpath::add(
+                        crate::hotpath::L_PUBLISH,
+                        crate::hotpath::tick().wrapping_sub(prof_pub),
+                    );
+                } else {
+                    // Wrapped chunk: assemble into the thread scratch, then
+                    // split-copy into the two halves (same bytes the staging
+                    // path pushed).
+                    crate::record::fill_scratch(scratch, len, f);
+                    #[cfg(feature = "hotpath-profiler")]
+                    crate::hotpath::add(
+                        crate::hotpath::L_ASSEMBLE,
+                        crate::hotpath::tick().wrapping_sub(prof_asm),
+                    );
+                    #[cfg(feature = "hotpath-profiler")]
+                    let prof_pub = crate::hotpath::tick();
+                    a.copy_from_slice(&scratch[..a.len()]);
+                    b.copy_from_slice(&scratch[a.len()..]);
+                    wchunk.commit_all();
+                    #[cfg(feature = "hotpath-profiler")]
+                    crate::hotpath::add(
+                        crate::hotpath::L_PUBLISH,
+                        crate::hotpath::tick().wrapping_sub(prof_pub),
+                    );
+                }
+            }
+            return;
+        }
+        // Batched path: assemble straight into the staged chunk — skips the
+        // staging → staged copy `commit(bytes)` had to make.
+        let start = self.staged.len();
+        // Grow the allocation before taking the pointer below; a no-op when
+        // the seeded capacity already covers the record.
+        self.staged.reserve(len);
+        #[cfg(feature = "hotpath-profiler")]
+        let prof_asm = crate::hotpath::tick();
+        // SAFETY: the `reserve` above guarantees `staged.capacity() >= start
+        // + len`, and `f`'s contract initializes `[start, start + len)`.
+        f(unsafe { self.staged.as_mut_ptr().add(start) });
+        // SAFETY: `f` initialized exactly that range.
+        unsafe { self.staged.set_len(start + len) };
+        #[cfg(feature = "hotpath-profiler")]
+        crate::hotpath::add(
+            crate::hotpath::L_ASSEMBLE,
+            crate::hotpath::tick().wrapping_sub(prof_asm),
+        );
+        self.staged_records += 1;
+        if self.staged_records >= chunk_size {
+            let to_flush = self.staged.len();
+            if to_flush > 0 {
+                #[cfg(feature = "hotpath-profiler")]
+                let prof_pub = crate::hotpath::tick();
+                // SAFETY: `reserve` verified `staged.len()` bytes of room and
+                // rtrb keeps one slot of slack, so `write_chunk` with the
+                // whole staged slice can never fail.
+                let mut wchunk = self
+                    .prod
+                    .write_chunk(to_flush)
+                    .expect("ticklog staged flush: reserve promised room");
+                {
+                    let (a, b) = wchunk.as_mut_slices();
+                    a.copy_from_slice(&self.staged[..a.len()]);
+                    if !b.is_empty() {
+                        b.copy_from_slice(&self.staged[a.len()..]);
+                    }
+                }
+                wchunk.commit_all();
+                self.staged.clear();
+                self.staged_records = 0;
+                #[cfg(feature = "hotpath-profiler")]
+                crate::hotpath::add(
+                    crate::hotpath::L_PUBLISH,
+                    crate::hotpath::tick().wrapping_sub(prof_pub),
+                );
             }
         }
     }
@@ -601,5 +735,61 @@ mod tests {
         producer.set_thread_info(8, "worker-2");
         assert_eq!(registration.thread_id(), 8);
         assert_eq!(registration.thread_name(), "worker-2");
+    }
+
+    #[test]
+    fn write_record_assembles_straight_into_the_ring() {
+        // Direct path (chunk_size 1): the closure writes into the ring chunk
+        // itself — neither the staged chunk nor the caller's scratch is used.
+        let (mut producer, registration) = split(CAP);
+        producer.set_chunk_size(1);
+        let payload = b"direct!!";
+        let mut scratch = Vec::new();
+        let slot = producer.reserve(payload.len(), Backpressure::Drop).unwrap();
+        assert!(slot.ptr.is_null()); // dummy for rtrb; bytes move in write_record
+        producer.write_record(payload.len(), &mut scratch, |ptr| {
+            // SAFETY: `write_record` handed `payload.len()` writable bytes.
+            unsafe {
+                std::ptr::copy_nonoverlapping(payload.as_ptr(), ptr, payload.len());
+            }
+        });
+        assert!(producer.staged.is_empty());
+        assert_eq!(producer.staged_records, 0);
+        assert!(scratch.is_empty()); // zero-copy: the scratch was never touched
+        let mut out = Vec::new();
+        assert_eq!(registration.pop_available(&mut out), payload.len());
+        assert_eq!(out, payload);
+        assert!(registration.is_empty());
+    }
+
+    #[test]
+    fn write_record_staged_path_assembles_into_the_staged_chunk() {
+        // Batched path (chunk_size 2): records are assembled directly into
+        // the staged chunk and flushed only when the chunk count is reached.
+        let (mut producer, registration) = split(CAP);
+        producer.set_chunk_size(2);
+        let mut scratch = Vec::new();
+        producer.reserve(2, Backpressure::Drop).unwrap();
+        producer.write_record(2, &mut scratch, |ptr| {
+            // SAFETY: `write_record` handed 2 writable bytes.
+            unsafe {
+                std::ptr::copy_nonoverlapping(b"11".as_ptr(), ptr, 2);
+            }
+        });
+        assert_eq!(&producer.staged[..], b"11");
+        assert!(registration.is_empty()); // 1 of 2: nothing flushed yet
+        producer.reserve(2, Backpressure::Drop).unwrap();
+        producer.write_record(2, &mut scratch, |ptr| {
+            // SAFETY: `write_record` handed 2 writable bytes.
+            unsafe {
+                std::ptr::copy_nonoverlapping(b"22".as_ptr(), ptr, 2);
+            }
+        });
+        assert!(producer.staged.is_empty());
+        assert!(scratch.is_empty()); // staged path never touches the scratch either
+        let mut out = Vec::new();
+        assert_eq!(registration.pop_available(&mut out), 4);
+        assert_eq!(out, b"1122");
+        assert!(registration.is_empty());
     }
 }

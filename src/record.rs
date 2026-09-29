@@ -173,6 +173,27 @@ pub(crate) fn assemble(
     }
 }
 
+/// Hands `f` a pointer to `len` writable bytes of `scratch` without
+/// zero-filling any of them, then sets `scratch`'s length to `len`.
+///
+/// `f` must initialize every one of the `len` bytes it is given — the same
+/// contract [`assemble`] documents for `dst` — so the uninitialized spare
+/// capacity is fully written before the slice becomes visible. The FIFO
+/// backends use this to assemble a record once and push it, with no
+/// `resize`-time memset on the hot path.
+#[cfg(feature = "fifo-backend")]
+#[inline]
+pub(crate) fn fill_scratch(scratch: &mut Vec<u8>, len: usize, f: impl FnOnce(*mut u8)) {
+    // Reset first so the pointer below addresses offset 0, then grow the
+    // allocation only if the seeded (or previously grown) capacity is short.
+    scratch.clear();
+    scratch.reserve(len);
+    f(scratch.spare_capacity_mut().as_mut_ptr().cast());
+    // SAFETY: `f`'s contract initializes all `len` bytes of the spare
+    // capacity it was handed, so `[0, len)` is initialized.
+    unsafe { scratch.set_len(len) };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

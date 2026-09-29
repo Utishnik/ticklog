@@ -167,6 +167,34 @@ impl RingBuffer {
         }
     }
 
+    /// Assembles the record through `f` into `scratch` (without zero-filling)
+    /// and pushes it in the single [`commit`](Self::commit) section under one
+    /// lock, so the drain (which locks the same mutex to pop) can never
+    /// observe a partial record.
+    ///
+    /// Must be called after [`reserve`](Self::reserve) succeeds with `len`
+    /// bytes; `f` receives `len` writable bytes and must initialize all of
+    /// them (the [`record::assemble`](crate::record::assemble) contract).
+    #[hotpath::measure]
+    pub(crate) fn write_record(&self, len: usize, scratch: &mut Vec<u8>, f: impl FnOnce(*mut u8)) {
+        #[cfg(feature = "hotpath-profiler")]
+        let prof_asm = crate::hotpath::tick();
+        crate::record::fill_scratch(scratch, len, f);
+        #[cfg(feature = "hotpath-profiler")]
+        crate::hotpath::add(
+            crate::hotpath::L_ASSEMBLE,
+            crate::hotpath::tick().wrapping_sub(prof_asm),
+        );
+        #[cfg(feature = "hotpath-profiler")]
+        let prof_pub = crate::hotpath::tick();
+        self.commit(scratch);
+        #[cfg(feature = "hotpath-profiler")]
+        crate::hotpath::add(
+            crate::hotpath::L_PUBLISH,
+            crate::hotpath::tick().wrapping_sub(prof_pub),
+        );
+    }
+
     /// Moves every buffered byte into `out`, returning how many were moved.
     /// Called by the drain; the producer never invokes this method.
     pub(crate) fn pop_available(&self, out: &mut Vec<u8>) -> usize {
@@ -239,6 +267,26 @@ mod tests {
         let mut out = Vec::new();
         assert_eq!(rb.pop_available(&mut out), 6);
         assert_eq!(out, b"abcdef");
+        assert!(rb.is_empty());
+    }
+
+    #[test]
+    fn write_record_assembles_into_scratch_and_pushes_once() {
+        let rb = RingBuffer::with_capacity(CAP);
+        let payload = b"hello!!";
+        rb.reserve(payload.len(), Backpressure::Drop).unwrap();
+        // Deliberately capacity-0: `write_record` must grow the scratch itself.
+        let mut scratch = Vec::new();
+        rb.write_record(payload.len(), &mut scratch, |ptr| {
+            // SAFETY: `write_record` handed `payload.len()` writable bytes.
+            unsafe {
+                std::ptr::copy_nonoverlapping(payload.as_ptr(), ptr, payload.len());
+            }
+        });
+        assert_eq!(&scratch[..], payload); // assembled once, pushed from scratch
+        let mut out = Vec::new();
+        assert_eq!(rb.pop_available(&mut out), payload.len());
+        assert_eq!(out, payload);
         assert!(rb.is_empty());
     }
 }
