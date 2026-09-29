@@ -7,7 +7,7 @@
 mod affinity;
 
 use criterion::{Criterion, criterion_group};
-use ticklog::{Level, NullSink, info};
+use ticklog::{Backpressure, Level, NullSink, info};
 
 fn bench_single_record(c: &mut Criterion) {
     affinity::pin_producer_from_env();
@@ -16,6 +16,7 @@ fn bench_single_record(c: &mut Criterion) {
     let guard = ticklog::configure! {
         sink: NullSink,
         max_level: Level::Trace,
+        backpressure: Backpressure::Block,
         drain_affinity: drain_affinity,
     }
     .expect("ticklog build");
