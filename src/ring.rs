@@ -604,6 +604,7 @@ mod custom {
         ///
         /// Single-producer: the calling thread is the sole writer of this
         /// ring's `head` and `tail_cache`.
+        #[hotpath::measure]
         #[inline]
         pub(crate) fn reserve(
             &self,
@@ -681,6 +682,7 @@ mod custom {
         /// Under the `watermark-head` feature the drain-facing store happens
         /// once per `WATERMARK_HEAD_RECORDS` publishes; every call still
         /// records the true position producer-privately.
+        #[hotpath::measure]
         #[inline(always)]
         pub(crate) fn publish(&self, r: Reservation) {
             #[cfg(feature = "watermark-head")]

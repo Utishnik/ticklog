@@ -34,6 +34,7 @@ const _: () = assert!(record::BASE_RECORD_SIZE == 25);
 /// Not part of the public API.
 #[allow(clippy::too_many_arguments)]
 #[doc(hidden)]
+#[hotpath::measure]
 #[inline(always)]
 pub fn dispatch(
     level: Level,

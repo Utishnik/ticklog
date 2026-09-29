@@ -98,6 +98,9 @@ jobs:
           cargo +nightly miri test --lib write_record
           cargo +nightly miri test --lib producer_and_drain
           cargo +nightly miri test --lib thread_buf
+          cargo +nightly miri test --lib raw_
+          cargo +nightly miri test --lib null_sink
+          cargo +nightly miri test --lib in_memory
         env:
           # tree-borrows: the aliasing model under test.
           # ignore-leaks: drain tests intentionally Box::leak tiny Site

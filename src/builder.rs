@@ -173,7 +173,7 @@ macro_rules! configure {
 /// arena-backed buffer pool.
 #[doc(hidden)]
 pub fn __configure_rt(
-    sink: Box<dyn LogSink>,
+    mut sink: Box<dyn LogSink>,
     timezone_offset: i32,
     drain_affinity: Option<Vec<usize>>,
     ring_capacity: usize,
@@ -226,12 +226,16 @@ pub fn __configure_rt(
     // NanoLog/Quill degrade to Block above, so no pool is ever installed.
     #[cfg(not(feature = "fifo-backend"))]
     if segmented {
+        // Probe the sink once: the producer-side helpers must know whether
+        // the shared queue carries raw wire records (raw fast path) or
+        // rendered lines. The sink cannot change after this point.
         let pool = crate::segments::Segments::init(
             backpressure,
             ring_capacity,
             timezone_offset,
             calibration,
             line_pattern.clone(),
+            sink.raw_sink().is_some(),
         );
         crate::segments::SEGMENTS
             .set(pool)

@@ -123,6 +123,16 @@
 //! - [`FileSink`]: a buffered single file, opened in append or truncate mode.
 //! - [`WriterSink`]: wraps any [`std::io::Write`]; the escape hatch for custom
 //!   destinations such as rotating files or the network.
+//! - [`NullSink`]: consumes every record with zero work — the baseline for
+//!   throughput benchmarks and for pipelines that only need the logging call
+//!   to be observable.
+//! - [`InMemorySink`]: captures records (or formatted lines) behind a handle
+//!   for tests, with optional bounded capacity and overflow policies.
+//!
+//! Sinks that consume whole records opt into the drain's raw fast path via
+//! [`RawLogSink`]: pattern rendering, timestamp formatting, and the
+//! thread-id/name snapshot are skipped entirely. Everything else keeps the
+//! formatted path.
 //!
 //! Compose and filter sinks with [`FanOut`] (dispatch one record to several
 //! sinks) and [`LogSinkExt::with_max_level`] (limit a sink to a level and below):
@@ -194,7 +204,8 @@ pub use guard::Guard;
 pub use level::Level;
 pub use record::Site;
 pub use sink::{
-    ColorMode, ConsoleSink, FanOut, FileSink, LogSink, LogSinkExt, WithLevel, WriterSink,
+    CapturedRecord, ColorMode, ConsoleSink, FanOut, FileSink, InMemoryHandle, InMemorySink,
+    LogSink, LogSinkExt, NullSink, Overflow, RawLogSink, WithLevel, WriterSink,
 };
 pub use thread_buf::warm_up;
 

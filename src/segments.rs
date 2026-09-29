@@ -83,9 +83,11 @@ pub(crate) struct Segments {
     spare_cv: Condvar,
 
     /// -- Shared line queue ---------------------------------------------------
-    /// Formatted `(line, level)` pairs produced by blocked NanoLog producers
-    /// helping with their own handed-off segments. The drain flushes this
-    /// queue to the sink once per poll pass (the sink stays single-writer).
+    /// Payloads produced by blocked NanoLog producers helping with their own
+    /// handed-off segments: formatted `(line, level)` pairs normally, or raw
+    /// `(record, level)` wire bytes when the sink opted into the raw fast
+    /// path. The drain flushes this queue to the sink once per poll pass
+    /// (the sink stays single-writer).
     lines: Mutex<VecDeque<(Vec<u8>, Level)>>,
 
     /// -- Formatter inputs for the helper path --------------------------------
@@ -94,18 +96,23 @@ pub(crate) struct Segments {
     timezone_offset: i32,
     calibration: Calibration,
     line_pattern: Template,
+    /// True when the configured sink accepts raw records: helpers then copy
+    /// wire bytes into the shared queue untouched instead of rendering lines.
+    raw: bool,
 }
 
 impl Segments {
     /// Builds the pool machinery for a segmented policy. For NanoLog this
     /// preallocates the whole bounded pool up front; for Quill it only creates
-    /// the arena (segments are carved on demand).
+    /// the arena (segments are carved on demand). `raw` mirrors
+    /// [`LogSink::raw_sink`](crate::LogSink::raw_sink) of the configured sink.
     pub(crate) fn init(
         policy: Backpressure,
         ring_capacity: usize,
         timezone_offset: i32,
         calibration: Calibration,
         line_pattern: Template,
+        raw: bool,
     ) -> Segments {
         let pool_size = (NANOLOG_POOL_BUDGET / ring_capacity).max(1);
         Self::init_with_pool_size(
@@ -115,6 +122,7 @@ impl Segments {
             timezone_offset,
             calibration,
             line_pattern,
+            raw,
         )
     }
 
@@ -127,6 +135,7 @@ impl Segments {
         timezone_offset: i32,
         calibration: Calibration,
         line_pattern: Template,
+        raw: bool,
     ) -> Segments {
         match policy {
             Backpressure::NanoLog => {
@@ -151,6 +160,7 @@ impl Segments {
                     timezone_offset,
                     calibration,
                     line_pattern,
+                    raw,
                 }
             }
             Backpressure::Quill => {
@@ -170,6 +180,7 @@ impl Segments {
                     timezone_offset,
                     calibration,
                     line_pattern,
+                    raw,
                 }
             }
             // The segmented machinery is only built for segmented policies;
@@ -280,22 +291,23 @@ impl Segments {
         ))
     }
 
-    /// Formats a handed-off segment that this producer reserved for the
-    /// helper, pushes the formatted lines into the shared queue, and recycles
-    /// the segment back to the pool.
+    /// Copies a handed-off segment that this producer reserved for the
+    /// helper into the shared queue (raw wire records when the sink is raw,
+    /// rendered lines otherwise), and recycles the segment back to the pool.
     ///
     /// Runs on the *producer* instead of the drain (NanoLog pool exhaustion).
     /// The segment must be `helper_reserved` so the drain skips it, and the
     /// reservation is kept set for the whole call so the drain can never read
     /// the segment concurrently.
     fn format_helper_segment(&self, ring: Arc<RingBuffer>) {
-        let lines = format_segment(
+        let payloads = format_segment(
             &ring,
+            self.raw,
             self.timezone_offset,
             &self.calibration,
             &self.line_pattern,
         );
-        self.push_lines(lines);
+        self.push_lines(payloads);
         // The drain skipped this segment while the reservation was set; it is
         // still skipped until the reset clears the flag below. Rewind the
         // control state (which also clears the reservation and `handed_off`,
@@ -306,15 +318,18 @@ impl Segments {
         self.recycle(ring);
     }
 
-    /// Pushes a batch of formatted lines into the shared queue (helper path).
+    /// Pushes a batch of helper payloads (formatted lines, or raw wire
+    /// records when the sink is raw) into the shared queue.
     pub(crate) fn push_lines(&self, lines: Vec<(Vec<u8>, Level)>) {
         if !lines.is_empty() {
             self.lines.lock().unwrap().extend(lines);
         }
     }
 
-    /// Takes everything currently in the shared line queue. Called by the
-    /// drain once per poll pass while a segmented policy is active.
+    /// Takes everything currently in the shared queue. Called by the
+    /// drain once per poll pass while a segmented policy is active; the
+    /// payloads are delivered as lines or raw records to match how they
+    /// were produced (see `Segments::raw`).
     pub(crate) fn take_lines(&self) -> Vec<(Vec<u8>, Level)> {
         let mut q = self.lines.lock().unwrap();
         std::mem::take(&mut *q).into_iter().collect()
@@ -354,6 +369,7 @@ mod tests {
                 wall_base_ns: 0,
             },
             pattern,
+            false,
         )
     }
 
@@ -404,6 +420,7 @@ mod tests {
                 wall_base_ns: 0,
             },
             pattern,
+            false,
         );
         assert!(
             !segs.alloc_fresh().recyclable(),

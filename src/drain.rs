@@ -470,6 +470,7 @@ impl Drain {
     /// Drains every ring once, emitting all records published since the last
     /// pass, and flushes the producer-helper line queue (segmented policies).
     /// Returns `true` if any record was processed.
+    #[hotpath::measure]
     fn poll_once(&mut self, staging: &mut Vec<u8>, buf: &mut Vec<u8>) -> bool {
         let mut had_work = false;
         let mut i = 0;
@@ -529,14 +530,26 @@ impl Drain {
             }
         }
 
-        // Segmented helpers produced formatted lines for the drain to write:
-        // the sink stays a single writer. This flush happens once per pass,
-        // after every ring, so line order from a single helper is preserved.
+        // Segmented helpers produced payloads for the drain to deliver (raw
+        // wire records when the sink is raw, formatted lines otherwise): the
+        // sink stays a single writer. This flush happens once per pass,
+        // after every ring, so payload order from a single helper is
+        // preserved.
         #[cfg(not(feature = "fifo-backend"))]
         if self.segmented && crate::segments::Segments::installed() {
             let collected = crate::segments::Segments::get().take_lines();
-            for (line, level) in collected {
-                if let Err(e) = self.sink.accept(&line, level) {
+            // Probe once per pass so the vtable check is not paid per payload.
+            let raw = self.sink.raw_sink().is_some();
+            for (payload, level) in collected {
+                let result = if raw {
+                    self.sink
+                        .raw_sink()
+                        .expect("invariant: raw_sink probed above and the sink is unchanged")
+                        .accept_raw(&payload, level)
+                } else {
+                    self.sink.accept(&payload, level)
+                };
+                if let Err(e) = result {
                     eprintln!("ticklog: sink accept failed: {}", e);
                 }
                 had_work = true;
@@ -612,11 +625,15 @@ fn drain_ring(
     line_pattern: &Template,
     buf: &mut Vec<u8>,
 ) -> bool {
+    // Probe the sink once per ring pass: a raw sink opts the whole pass out
+    // of rendering (see `RawLogSink`).
+    let raw = sink.raw_sink().is_some();
     ring.mark_draining();
     let had_work = drain_ring_inner(
         ring,
         Some(sink),
         None,
+        raw,
         timezone_offset,
         calibration,
         line_pattern,
@@ -632,6 +649,10 @@ fn drain_ring(
 /// helper path, where a pool-exhausted producer formats its own full segment
 /// to keep the blocking time bounded.
 ///
+/// With `raw` set, the wire records are collected verbatim instead of being
+/// rendered — the shared `(payload, level)` queue then carries raw bytes, and
+/// the drain delivers them through `RawLogSink::accept_raw`.
+///
 /// The producer must have stopped appending to `ring` (handed off). It first
 /// waits for the drain to clear `draining`: the drain may be mid-drain on this
 /// very segment, and the two formatters must not both read the same range as
@@ -639,6 +660,7 @@ fn drain_ring(
 #[cfg(not(feature = "fifo-backend"))]
 pub(crate) fn format_segment(
     ring: &RingBuffer,
+    raw: bool,
     timezone_offset: i32,
     calibration: &Calibration,
     line_pattern: &Template,
@@ -653,6 +675,7 @@ pub(crate) fn format_segment(
         ring,
         None,
         Some(&mut lines),
+        raw,
         timezone_offset,
         calibration,
         line_pattern,
@@ -662,16 +685,25 @@ pub(crate) fn format_segment(
 }
 
 /// Shared record-decoding core for the drain thread and the producer-side
-/// helper. Formats every record in `[tail, head)` of a custom ring, dispatching
-/// each formatted line either to `sink` or, when formatting on the producer
-/// side, into `lines` as an owned buffer. Publishes the advanced tail in all
-/// cases: the tail defines what the drain has consumed, and the helper
+/// helper. Delivers every record in `[tail, head)` of a custom ring either to
+/// `sink` (rendered line) or, with `raw`, as the undecoded wire record to a
+/// [`RawLogSink`](crate::RawLogSink) — or into `lines` as an owned buffer when
+/// formatting (or copying) on the producer side. Publishes the advanced tail
+/// in all cases: the tail defines what the drain has consumed, and the helper
 /// precedes its recycle of the segment with this same store.
+///
+/// Validation (version, type, framing), corrupt-frame resync, and
+/// end-of-buffer skipping are identical on both paths; `raw` only skips
+/// rendering. The caller probes the sink once and passes the result so the
+/// vtable check is not paid per record.
 #[cfg(not(feature = "fifo-backend"))]
-fn drain_ring_inner(
+#[allow(clippy::too_many_arguments)]
+#[hotpath::measure]
+pub(crate) fn drain_ring_inner(
     ring: &RingBuffer,
     mut sink: Option<&mut dyn LogSink>,
     mut lines: Option<&mut Vec<(Vec<u8>, Level)>>,
+    raw: bool,
     timezone_offset: i32,
     calibration: &Calibration,
     line_pattern: &Template,
@@ -691,8 +723,14 @@ fn drain_ring_inner(
     // Thread identity lives on the ring (registered once per incarnation),
     // never in the records. Snapshot it once per pass — a cheap atomic load
     // plus one small-string clone — so formatting needs no per-record lock.
+    // The raw path renders nothing, so it skips the clone (the only
+    // allocating part of the snapshot).
     let ring_thread_id = ring.thread_id();
-    let ring_thread_name = ring.thread_name();
+    let ring_thread_name = if raw {
+        String::new()
+    } else {
+        ring.thread_name()
+    };
     let capacity = ring.capacity();
     let mask = (capacity - 1) as u64;
     // Own index: Relaxed load; the drain is the sole writer of `tail`.
@@ -765,30 +803,55 @@ fn drain_ring_inner(
             .and_then(|&b| Level::from_u8(b))
             .unwrap_or(Level::Error);
 
-        buf.clear();
-        decode_and_format(
-            record,
-            timezone_offset,
-            calibration,
-            line_pattern,
-            ring_thread_id,
-            &ring_thread_name,
-            buf,
-        );
-        match sink.as_mut() {
-            Some(s) => {
-                if let Err(e) = s.accept(buf, level) {
-                    eprintln!("ticklog: sink accept failed: {}", e);
+        if raw {
+            // Raw fast path: hand the wire bytes over untouched. One vtable
+            // dispatch; no rendering, no timestamp conversion, no name clone.
+            match sink.as_mut() {
+                Some(s) => {
+                    let raw_sink = s
+                        .raw_sink()
+                        .expect("invariant: caller probed raw_sink before the pass");
+                    if let Err(e) = raw_sink.accept_raw(record, level) {
+                        eprintln!("ticklog: sink accept failed: {}", e);
+                    }
+                }
+                None => {
+                    // Producer-side helper in raw mode: the shared queue
+                    // carries wire records until the drain delivers them.
+                    // SAFETY: `lines` is always Some when `sink` is None (the
+                    // only such caller is format_segment, which supplies it).
+                    lines
+                        .as_mut()
+                        .expect("invariant: lines required when copying without a sink")
+                        .push((record.to_vec(), level));
                 }
             }
-            None => {
-                // SAFETY: `lines` is always Some when `sink` is None (the only
-                // caller is format_segment, which supplies both). Moving the
-                // line out keeps the caller's staging buffer reusable.
-                lines
-                    .as_mut()
-                    .expect("invariant: lines required when formatting without a sink")
-                    .push((std::mem::take(buf), level));
+        } else {
+            buf.clear();
+            decode_and_format(
+                record,
+                timezone_offset,
+                calibration,
+                line_pattern,
+                ring_thread_id,
+                &ring_thread_name,
+                buf,
+            );
+            match sink.as_mut() {
+                Some(s) => {
+                    if let Err(e) = s.accept(buf, level) {
+                        eprintln!("ticklog: sink accept failed: {}", e);
+                    }
+                }
+                None => {
+                    // SAFETY: `lines` is always Some when `sink` is None (the only
+                    // caller is format_segment, which supplies both). Moving the
+                    // line out keeps the caller's staging buffer reusable.
+                    lines
+                        .as_mut()
+                        .expect("invariant: lines required when formatting without a sink")
+                        .push((std::mem::take(buf), level));
+                }
             }
         }
         had_work = true;
@@ -815,6 +878,7 @@ fn drain_ring_inner(
 /// The drain holds no lock while decoding, so the producer never blocks on
 /// sink I/O: `pop_available` releases the FIFO mutex before formatting.
 #[cfg(feature = "fifo-backend")]
+#[hotpath::measure]
 fn drain_ring(
     ring: &RingBuffer,
     staging: &mut Vec<u8>,
@@ -825,11 +889,20 @@ fn drain_ring(
     buf: &mut Vec<u8>,
 ) -> bool {
     ring.pop_available(staging);
+    // Probe the sink once per ring pass: a raw sink opts the whole pass out
+    // of rendering (see `RawLogSink`).
+    let raw = sink.raw_sink().is_some();
     // Thread identity lives on the ring (registered once per incarnation),
     // never in the records. Snapshot it once per pass — a cheap atomic load
     // plus one small-string clone — so formatting needs no per-record lock.
+    // The raw path renders nothing, so it skips the clone (the only
+    // allocating part of the snapshot).
     let ring_thread_id = ring.thread_id();
-    let ring_thread_name = ring.thread_name();
+    let ring_thread_name = if raw {
+        String::new()
+    } else {
+        ring.thread_name()
+    };
     let mut had_work = false;
     let mut pos = 0usize;
     while staging.len() - pos >= HEADER_SIZE {
@@ -862,18 +935,30 @@ fn drain_ring(
             .and_then(|&b| Level::from_u8(b))
             .unwrap_or(Level::Error);
 
-        buf.clear();
-        decode_and_format(
-            record,
-            timezone_offset,
-            calibration,
-            line_pattern,
-            ring_thread_id,
-            &ring_thread_name,
-            buf,
-        );
-        if let Err(e) = sink.accept(buf, level) {
-            eprintln!("ticklog: sink accept failed: {}", e);
+        if raw {
+            // Raw fast path: hand the wire bytes over untouched; the sink
+            // copies what it wants before this call returns (the bytes live
+            // in `staging` and are drained below).
+            let raw_sink = sink
+                .raw_sink()
+                .expect("invariant: caller probed raw_sink before the pass");
+            if let Err(e) = raw_sink.accept_raw(record, level) {
+                eprintln!("ticklog: sink accept failed: {}", e);
+            }
+        } else {
+            buf.clear();
+            decode_and_format(
+                record,
+                timezone_offset,
+                calibration,
+                line_pattern,
+                ring_thread_id,
+                &ring_thread_name,
+                buf,
+            );
+            if let Err(e) = sink.accept(buf, level) {
+                eprintln!("ticklog: sink accept failed: {}", e);
+            }
         }
         pos += total_size;
         had_work = true;
@@ -892,6 +977,7 @@ fn drain_ring(
 /// The caller has validated that `record` spans `total_size` bytes of a
 /// `LOG_RECORD`. All formatting into `Vec<u8>` is infallible; unknown argument
 /// tags produce a placeholder rather than panicking.
+#[hotpath::measure]
 fn decode_and_format(
     record: &[u8],
     timezone_offset: i32,
@@ -1025,6 +1111,7 @@ fn decode_and_format(
 /// Renders one log line by walking the pattern [`Template`] and dispatching
 /// each [`Segment::Place`] by its field name.
 #[allow(clippy::too_many_arguments)]
+#[hotpath::measure]
 fn render_pattern(
     template: &Template,
     ns: u64,
@@ -1952,6 +2039,211 @@ mod tests {
 
         producer.join().unwrap();
         assert_eq!(calls.lock().unwrap().len(), N);
+    }
+
+    // ---- raw fast-path tests ------------------------------------------------
+
+    /// A drain over a raw [`InMemorySink`](crate::InMemorySink) plus the
+    /// sink's handle, so tests can assert exactly what the raw path
+    /// delivered (and, via `lines_len() == 0`, that rendering never ran).
+    fn raw_drain() -> (Drain, crate::sink::InMemoryHandle) {
+        let sink = crate::sink::InMemorySink::new();
+        let handle = sink.handle();
+        let drain = Drain::new(
+            Box::new(sink),
+            0,
+            Arc::new(AtomicBool::new(false)),
+            identity_calibration(),
+            default_line_pattern(),
+            false,
+        );
+        (drain, handle)
+    }
+
+    #[test]
+    #[cfg(not(feature = "fifo-backend"))]
+    fn raw_poll_delivers_record_bytes_and_skips_rendering() {
+        let (mut drain, handle) = raw_drain();
+        let ring = Arc::new(RingBuffer::new());
+        let record = build_record(
+            Level::Info,
+            0,
+            site_of("x={}", "a.rs", 7),
+            &[le_bytes(TAG_U64, 42)],
+        );
+        place_record(&ring, 0, &record);
+        let head = ring.head().load(Ordering::Acquire);
+        drain.rings.push((Arc::clone(&ring), ring.serial()));
+
+        let mut staging = Vec::new();
+        let mut buf = Vec::new();
+        assert!(drain.poll_once(&mut staging, &mut buf));
+
+        let captured = handle.records();
+        assert_eq!(captured.len(), 1);
+        assert_eq!(
+            captured[0].as_bytes(),
+            &record,
+            "the raw path must deliver the wire record verbatim"
+        );
+        assert_eq!(captured[0].level(), Level::Info);
+        assert_eq!(
+            handle.lines_len(),
+            0,
+            "rendering must be skipped on the raw path"
+        );
+        // tail advanced to head; a second poll finds no work.
+        assert_eq!(ring.tail().load(Ordering::Relaxed), head);
+        assert!(!drain.poll_once(&mut staging, &mut buf));
+    }
+
+    #[test]
+    #[cfg(not(feature = "fifo-backend"))]
+    fn raw_poll_preserves_order_and_levels() {
+        let (mut drain, handle) = raw_drain();
+        let ring = Arc::new(RingBuffer::new());
+
+        let r1 = build_record(Level::Info, 0, site_of("a", "", 0), &[]);
+        let r2 = build_record(Level::Warn, 1, site_of("b", "", 0), &[]);
+        let slot = SLOT_SIZE as u64;
+        // Two records in consecutive slots; head past both.
+        {
+            // SAFETY: single-threaded test with exclusive access.
+            let data = unsafe { std::slice::from_raw_parts_mut(ring.data_ptr(), ring.capacity()) };
+            data[..r1.len()].copy_from_slice(&r1);
+            let off2 = slot as usize;
+            data[off2..off2 + r2.len()].copy_from_slice(&r2);
+        }
+        ring.head().store(2 * slot, Ordering::Release);
+        drain.rings.push((Arc::clone(&ring), ring.serial()));
+
+        let mut staging = Vec::new();
+        let mut buf = Vec::new();
+        assert!(drain.poll_once(&mut staging, &mut buf));
+
+        let captured = handle.records();
+        assert_eq!(captured.len(), 2);
+        assert_eq!(captured[0].as_bytes(), &r1);
+        assert_eq!(captured[0].level(), Level::Info);
+        assert_eq!(captured[1].as_bytes(), &r2);
+        assert_eq!(captured[1].level(), Level::Warn);
+        assert_eq!(handle.lines_len(), 0);
+    }
+
+    #[test]
+    #[cfg(not(feature = "fifo-backend"))]
+    fn raw_poll_discards_corrupt_record_and_resyncs_to_head() {
+        let (mut drain, handle) = raw_drain();
+        let ring = Arc::new(RingBuffer::new());
+
+        // Valid record, corrupt frame, valid record: only the first is
+        // delivered, and `tail` resyncs to the published head (so the record
+        // after the corruption is skipped too, exactly as on the formatted
+        // path).
+        let r1 = build_record(Level::Info, 0, site_of("first", "", 0), &[]);
+        place_record(&ring, 0, &r1);
+        let off2 = align_up(r1.len() as u64, SLOT_SIZE as u64);
+
+        let mut bad = build_record(Level::Info, 0, site_of("corrupt", "", 0), &[]);
+        bad[1] = 0x7F; // not LOG_RECORD (1) or END_OF_BUFFER (2)
+        place_record(&ring, off2, &bad);
+        let off3 = off2 + align_up(bad.len() as u64, SLOT_SIZE as u64);
+
+        let r2 = build_record(Level::Info, 0, site_of("second", "", 0), &[]);
+        place_record(&ring, off3, &r2);
+
+        drain.rings.push((Arc::clone(&ring), ring.serial()));
+        let mut staging = Vec::new();
+        let mut buf = Vec::new();
+        drain.poll_once(&mut staging, &mut buf);
+
+        let captured = handle.records();
+        assert_eq!(captured.len(), 1, "got {} records", captured.len());
+        assert_eq!(
+            captured[0].as_bytes(),
+            &r1,
+            "only the record before the corruption is delivered"
+        );
+        assert_eq!(
+            ring.tail().load(Ordering::Relaxed),
+            ring.head().load(Ordering::Acquire),
+            "corrupt frame resyncs tail to head"
+        );
+    }
+
+    #[test]
+    #[cfg(not(feature = "fifo-backend"))]
+    fn raw_poll_skips_end_of_buffer_record() {
+        let (mut drain, handle) = raw_drain();
+        let ring = Arc::new(RingBuffer::new());
+
+        // An EOB record spanning one slot, followed by a real record.
+        let mut eob = Vec::new();
+        eob.push(VERSION); // version
+        eob.push(END_OF_BUFFER); // type
+        eob.extend_from_slice(&(SLOT_SIZE as u16).to_le_bytes()); // total_size
+        eob.resize(SLOT_SIZE, 0); // pad to a full slot
+        place_record(&ring, 0, &eob);
+
+        let record = build_record(Level::Info, 0, site_of("hi", "", 0), &[]);
+        place_record(&ring, SLOT_SIZE as u64, &record);
+
+        drain.rings.push((Arc::clone(&ring), ring.serial()));
+        let mut staging = Vec::new();
+        let mut buf = Vec::new();
+        assert!(drain.poll_once(&mut staging, &mut buf));
+
+        let captured = handle.records();
+        assert_eq!(captured.len(), 1, "EOB must not be delivered");
+        assert_eq!(captured[0].as_bytes(), &record);
+        assert_eq!(captured[0].level(), Level::Info);
+    }
+
+    #[test]
+    #[cfg(not(feature = "fifo-backend"))]
+    fn raw_format_segment_copies_wire_bytes_instead_of_rendering() {
+        // Raw mode: the payload is the wire record itself.
+        let raw_ring = Arc::new(RingBuffer::new());
+        let record = build_record(Level::Warn, 0, site_of("seg", "s.rs", 3), &[]);
+        place_record(&raw_ring, 0, &record);
+
+        let raw = format_segment(
+            &raw_ring,
+            true,
+            0,
+            &identity_calibration(),
+            &default_line_pattern(),
+        );
+        assert_eq!(raw.len(), 1);
+        assert_eq!(
+            raw[0].0, record,
+            "helper must copy the wire record verbatim"
+        );
+        assert_eq!(raw[0].1, Level::Warn);
+        // Like the drain, the helper publishes the advanced tail (the segment
+        // is about to be recycled, so its control state is rewound anyway).
+        assert_eq!(
+            raw_ring.tail().load(Ordering::Relaxed),
+            raw_ring.head().load(Ordering::Acquire)
+        );
+
+        // Formatted contrast on an identical ring: the same segment rendered
+        // as a log line instead of copied.
+        let line_ring = Arc::new(RingBuffer::new());
+        place_record(&line_ring, 0, &record);
+        let lines = format_segment(
+            &line_ring,
+            false,
+            0,
+            &identity_calibration(),
+            &default_line_pattern(),
+        );
+        assert_eq!(lines.len(), 1);
+        assert_eq!(
+            String::from_utf8(lines[0].0.clone()).unwrap(),
+            "1970-01-01T00:00:00.000000000Z WARN s.rs:3 seg",
+            "formatted mode must render, not copy"
+        );
     }
 
     // ---- FIFO-backend drain tests ------------------------------------------

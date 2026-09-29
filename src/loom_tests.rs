@@ -18,6 +18,9 @@
 //! - `ThreadBuf::drop` publishing `live = false`
 //! - `Guard::drop` publishing `shutdown = true` and joining the drain
 //! - helper reservation / `mark_recycled` exactly-once
+//! - raw fast path: the real `drain_ring_inner` delivering each published
+//!   record exactly once to a `RawLogSink`, and advancing `tail` so a Block
+//!   producer unblocks (both models drive the production code, not a mirror)
 //!
 //! Process-global `OnceLock`s (`REGISTRY`, `SEGMENTS`, …) are intentionally
 //! untouched: loom re-executes the model in one process, so one-shot globals
@@ -28,11 +31,14 @@ use std::sync::Arc;
 use loom::thread;
 
 use crate::builder::Backpressure as Policy;
+use crate::format::Template;
 use crate::guard::Guard;
 use crate::record::{END_OF_BUFFER, HEADER_SIZE, LOG_RECORD, VERSION};
 use crate::ring::{RingBuffer, SLOT_SIZE, align_up};
+use crate::sink::{InMemoryHandle, InMemorySink};
 use crate::sync::Ordering;
 use crate::thread_buf::ThreadBuf;
+use crate::timestamp::Calibration;
 
 /// Capacity used by the small models: four slots. The free-running-counter
 /// ring treats a write as fitting only when `head + size - tail <= mask`
@@ -123,6 +129,46 @@ fn prefill(rb: &RingBuffer, n: usize) {
         write_header(r.ptr, REC as u16, 3);
         rb.publish(r);
     }
+}
+
+/// `write_header` plus a tag in the timestamp field (bytes 8..16), so a model
+/// can identify an individual record in whatever the raw sink captured.
+fn write_tagged(ptr: *mut u8, total_size: u16, tag: u64) {
+    write_header(ptr, total_size, 3);
+    // SAFETY: `reserve` returned at least `REC` writable bytes; tags live in
+    // the record header's timestamp field.
+    unsafe {
+        for (i, b) in tag.to_le_bytes().iter().enumerate() {
+            ptr.add(8 + i).write(*b);
+        }
+    }
+}
+
+/// One pass through the real `drain_ring_inner` in raw mode over `rb`, with a
+/// fresh `InMemorySink`. Returns the sink's handle so the model can assert on
+/// exactly what was delivered (and by which pass).
+fn drain_raw_once(rb: &RingBuffer) -> InMemoryHandle {
+    let mut sink = InMemorySink::new();
+    let handle = sink.handle();
+    let mut buf = Vec::new();
+    let calibration = Calibration {
+        counter_to_ns: 1.0,
+        counter_base: 0,
+        wall_base_ns: 0,
+    };
+    let pattern = Template::parse(crate::builder::DEFAULT_LINE_PATTERN)
+        .expect("invariant: default pattern is valid");
+    crate::drain::drain_ring_inner(
+        rb,
+        Some(&mut sink),
+        None,
+        true,
+        0,
+        &calibration,
+        &pattern,
+        &mut buf,
+    );
+    handle
 }
 
 #[test]
@@ -414,5 +460,94 @@ fn loom_helper_reservation_exactly_once() {
             "mark_recycled must return true exactly once"
         );
         assert!(!rb.helper_reserved(), "reservation cleared");
+    });
+}
+
+#[test]
+fn loom_raw_drain_delivers_each_published_record_exactly_once() {
+    loom::model(|| {
+        let rb = Arc::new(RingBuffer::with_capacity(CAP));
+        let rb_p = Arc::clone(&rb);
+        let rb_c = Arc::clone(&rb);
+
+        let producer = thread::spawn(move || {
+            let r = rb_p
+                .reserve(REC, Policy::Drop)
+                .expect("empty ring must reserve");
+            write_tagged(r.ptr, REC as u16, 7);
+            rb_p.publish(r);
+        });
+
+        // The consumer drives the REAL raw drain path. Whatever it races
+        // past, the final main-thread pass must pick up — never both, never
+        // neither: tail advances exactly once over the record.
+        let consumer = thread::spawn(move || drain_raw_once(&rb_c));
+
+        producer.join().unwrap();
+        let first = consumer.join().unwrap();
+        let second = drain_raw_once(&rb);
+
+        let mut tags: Vec<u64> = first
+            .records()
+            .iter()
+            .map(|r| r.timestamp_ticks())
+            .collect();
+        tags.extend(second.records().iter().map(|r| r.timestamp_ticks()));
+        assert_eq!(tags, vec![7], "the record must be delivered exactly once");
+
+        let head = rb.head().load(Ordering::Acquire);
+        let tail = rb.tail().load(Ordering::Acquire);
+        assert_eq!(head, REC as u64, "one record published");
+        assert_eq!(tail, head, "raw drain must catch up to head");
+    });
+}
+
+#[test]
+fn loom_raw_drain_unblocks_block_producer() {
+    loom::model(|| {
+        let rb = Arc::new(RingBuffer::with_capacity(CAP));
+        // Same prefill as `loom_block_unblocks_when_drain_advances_tail`, but
+        // the consumer frees space through the real raw drain (parse + tail
+        // advance) instead of a bulk tail store: Block must still unblock.
+        prefill(&rb, 3);
+        assert_eq!(rb.head().load(Ordering::Relaxed), 3 * SLOT_SIZE as u64);
+
+        let rb_p = Arc::clone(&rb);
+        let rb_c = Arc::clone(&rb);
+
+        let producer = thread::spawn(move || {
+            // Under ticklog_loom the Block spin is bounded (see ring.rs), so
+            // this may return None if the consumer did not free space within
+            // the loom spin budget. Real builds still wait forever.
+            rb_p.reserve(REC, Policy::Block).map(|r| {
+                write_header(r.ptr, REC as u16, 3);
+                rb_p.publish(r);
+            })
+        });
+
+        let consumer = thread::spawn(move || drain_raw_once(&rb_c));
+
+        let published = producer.join().unwrap();
+        let handle = consumer.join().unwrap();
+
+        // If the bounded loom spin gave up, free space is already available
+        // (consumer ran); a sequential Block reserve must now succeed.
+        if published.is_none() {
+            let r = rb
+                .reserve(REC, Policy::Block)
+                .expect("raw drain freed space; sequential Block must succeed");
+            write_header(r.ptr, REC as u16, 3);
+            rb.publish(r);
+        }
+
+        // The consumer's single pass always sees exactly the three prefill
+        // records: its tail advance is what unblocks the producer, so the
+        // fourth record can only be published after that pass completed.
+        assert_eq!(handle.records_len(), 3, "raw path delivered the prefill");
+        let head = rb.head().load(Ordering::Acquire);
+        let tail = rb.tail().load(Ordering::Acquire);
+        assert_eq!(head, 4 * SLOT_SIZE as u64, "fourth record published");
+        assert_eq!(tail, 3 * SLOT_SIZE as u64, "consumer ran before the fourth");
+        assert!(head.wrapping_sub(tail) <= CAP as u64, "no overwrite");
     });
 }

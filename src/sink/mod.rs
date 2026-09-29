@@ -4,16 +4,23 @@
 //! three concrete sinks: [`ConsoleSink`] (the default), [`FileSink`], and the
 //! [`WriterSink`] escape hatch for any [`io::Write`]. It also provides a
 //! level-filtering adapter ([`WithLevel`]) and a multi-sink fan-out ([`FanOut`]).
+//!
+//! For sinks that do not need rendered lines the [`fast`] module provides
+//! [`NullSink`] (a zero-work consumer) and [`InMemorySink`] (raw capture for
+//! tests). Both opt into the drain's raw fast path via [`RawLogSink`], which
+//! skips pattern rendering and timestamp/thread snapshots entirely.
 
 use std::io;
 
 use crate::level::Level;
 
 mod console;
+mod fast;
 mod file;
 mod writer;
 
 pub use console::{ColorMode, ConsoleSink};
+pub use fast::{CapturedRecord, InMemoryHandle, InMemorySink, NullSink, Overflow};
 pub use file::FileSink;
 pub use writer::WriterSink;
 
@@ -22,6 +29,11 @@ pub use writer::WriterSink;
 /// The `line` passed to [`accept`](LogSink::accept) is valid UTF-8 without a
 /// trailing newline. To use any [`io::Write`] as a sink, wrap it in
 /// [`WriterSink`].
+///
+/// Implementors that consume whole log records instead of rendered lines can
+/// opt into the drain's raw fast path by implementing [`RawLogSink`] and
+/// returning `Some(self)` from [`raw_sink`](LogSink::raw_sink); everything else
+/// keeps the default `None` and receives formatted lines as before.
 pub trait LogSink: Send + 'static {
     /// Writes a formatted log line to this sink.
     ///
@@ -46,6 +58,35 @@ pub trait LogSink: Send + 'static {
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
+
+    /// Returns this sink as a [`RawLogSink`] when it consumes raw records,
+    /// or `None` when it only accepts formatted lines.
+    ///
+    /// The drain probes this once at startup: `Some` switches the whole
+    /// pipeline to the raw fast path (no pattern rendering, no timestamp or
+    /// thread-name snapshot), `None` keeps the formatted path. Adapters that
+    /// delegate storage ([`WithLevel`]) forward the call; adapters that fan
+    /// records out ([`FanOut`]) always return `None`, because one child may
+    /// need formatted lines even when another does not.
+    fn raw_sink(&mut self) -> Option<&mut dyn RawLogSink> {
+        None
+    }
+}
+
+/// A [`LogSink`] that receives undecoded log records instead of rendered
+/// lines.
+///
+/// The drain still validates, resynchronizes, and tail-advances exactly as on
+/// the formatted path; only rendering (pattern match, timestamp formatting,
+/// thread-id/name snapshot) is skipped. `record` is the raw wire-format
+/// payload of one log event — valid for the duration of the call only.
+/// Implementors that retain bytes must copy them.
+///
+/// `level` is the level parsed from the record header, which the drain has
+/// already checked against the configured `max_level`.
+pub trait RawLogSink: LogSink {
+    /// Accepts one raw log record.
+    fn accept_raw(&mut self, record: &[u8], level: Level) -> io::Result<()>;
 }
 
 /// A [`LogSink`] adapter that overrides the maximum level of an inner sink.
@@ -65,6 +106,10 @@ impl<S: LogSink> LogSink for WithLevel<S> {
 
     fn flush(&mut self) -> io::Result<()> {
         self.sink.flush()
+    }
+
+    fn raw_sink(&mut self) -> Option<&mut dyn RawLogSink> {
+        self.sink.raw_sink()
     }
 }
 
@@ -91,6 +136,11 @@ impl<T: LogSink + Sized> LogSinkExt for T {}
 /// [`max_level`](LogSink::max_level). If an inner sink returns an error,
 /// the error is logged to stderr and dispatch continues to the remaining
 /// sinks.
+///
+/// A fan-out always takes the formatted path: [`raw_sink`](LogSink::raw_sink)
+/// returns `None`, because one child may need rendered lines even when
+/// another child would prefer raw records — every child must see the same
+/// input.
 ///
 /// ```
 /// use ticklog::{ConsoleSink, FanOut, Level, LogSinkExt};
@@ -340,6 +390,30 @@ mod tests {
             .add(FlushSpy(Arc::clone(&flushes)));
         fan.flush().unwrap();
         assert_eq!(flushes.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn default_raw_sink_is_none() {
+        let (mut spy, _calls) = SpySink::new(Level::Trace);
+        assert!(spy.raw_sink().is_none());
+    }
+
+    #[test]
+    fn with_level_forwards_raw_sink() {
+        let mut wrapped = crate::sink::InMemorySink::new().with_max_level(Level::Info);
+        assert!(
+            wrapped.raw_sink().is_some(),
+            "WithLevel must forward the raw fast path to its inner sink"
+        );
+    }
+
+    #[test]
+    fn fan_out_always_takes_the_formatted_path() {
+        let mut fan = FanOut::new().add(crate::sink::InMemorySink::new());
+        assert!(
+            fan.raw_sink().is_none(),
+            "FanOut children may disagree on raw vs formatted, so it must never go raw"
+        );
     }
 
     #[test]

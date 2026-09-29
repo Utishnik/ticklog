@@ -12,6 +12,12 @@ version = "0.1.2"
 [dependencies]
 core_affinity = "0.8"
 crossbeam-utils = "0.8"
+# Hot-path profiler annotations (`#[hotpath::measure]`). Zero-cost unless the
+# consumer crate turns on `hotpath/hotpath` (e.g. `cargo run --features
+# hotpath/hotpath` in this repo, or `hotpath = { features = ["hotpath"] }` in a
+# dependent); the macros then expand to timing wrappers and the `hotpath`
+# runtime prints a per-function report on exit.
+hotpath = "0.27"
 r3 = { git = "https://github.com/Utishnik/mytestrs" }
 ringbuffer = { version = "0.16", optional = true }
 ringbuf = { version = "0.5", optional = true }

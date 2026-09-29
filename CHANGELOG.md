@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A raw fast path for sinks that take wire bytes: `LogSink::raw_sink` returns
+  `Some(&mut dyn RawLogSink)` to opt the whole drain pass out of decoding and
+  line rendering; every record is handed over verbatim through
+  `RawLogSink::accept_raw`. `WithLevel` forwards the probe; `FanOut` always
+  takes the formatted path.
+- `NullSink`, a sink that discards everything, and `InMemorySink`, an
+  in-memory capture sink with an optional record capacity and three overflow
+  policies (`Overflow::Unbounded`, `Overflow::DropNewest`,
+  `Overflow::DropOldest`), both wired through the raw fast path. Reads go
+  through the clonable `InMemoryHandle`.
+- `#[hotpath::measure]` annotations on the producer and drain hot path
+  (`dispatch`, `ring::reserve`, `ring::publish`, `drain::poll_once`,
+  `drain_ring_inner`, the FIFO `drain_ring`, `decode_and_format`,
+  `render_pattern`). The annotations are zero-cost unless the consumer turns
+  on the `hotpath/hotpath` feature.
+
 ## [0.1.2] - 2026-09-11
 
 ### Added
