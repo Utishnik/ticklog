@@ -143,10 +143,14 @@ impl LogSink for NullSink {
     }
 }
 
-// Sink selection: null by default, real file with --sink-file.
+// Sink selection: null by default, real file with --sink-file. `Raw` is the
+// profiling-only raw fast path (--sink-raw): ticklog::NullSink implements
+// RawLogSink, so the drain skips pattern rendering, timestamp conversion, and
+// per-argument formatting entirely. It isolates pipeline cost from render cost.
 enum BenchSink {
     Null(NullSink),
     File(FileSink),
+    Raw(ticklog::NullSink),
 }
 
 impl LogSink for BenchSink {
@@ -154,6 +158,7 @@ impl LogSink for BenchSink {
         match self {
             BenchSink::Null(s) => s.accept(line, level),
             BenchSink::File(s) => s.accept(line, level),
+            BenchSink::Raw(s) => s.accept(line, level),
         }
     }
 
@@ -161,6 +166,14 @@ impl LogSink for BenchSink {
         match self {
             BenchSink::Null(s) => s.flush(),
             BenchSink::File(s) => s.flush(),
+            BenchSink::Raw(s) => s.flush(),
+        }
+    }
+
+    fn raw_sink(&mut self) -> Option<&mut dyn ticklog::RawLogSink> {
+        match self {
+            BenchSink::Raw(s) => s.raw_sink(),
+            _ => None,
         }
     }
 }
@@ -389,6 +402,9 @@ struct Config {
     /// Path of a sink file. When set, ticklog writes formatted lines to this
     /// file (truncated) instead of discarding them in a null sink.
     sink_file: Option<PathBuf>,
+    /// Profiling: route the pipeline through ticklog::NullSink's raw fast path
+    /// (no rendering). Ignored when --sink-file is set.
+    sink_raw: bool,
     /// Report name in the JSON output ("ticklog" or "ticklog_file").
     candidate_name: String,
 }
@@ -422,6 +438,7 @@ fn parse_args() -> Config {
     let mut ring_capacity = None;
     let mut chunk_size = None;
     let mut sink_file = None;
+    let mut sink_raw = false;
     let mut samples = None;
     let mut candidate_override = None;
 
@@ -495,6 +512,9 @@ fn parse_args() -> Config {
                 }
                 sink_file = Some(PathBuf::from(&args[i]));
             }
+            "--sink-raw" => {
+                sink_raw = true;
+            }
             "--candidate" => {
                 i += 1;
                 if i >= args.len() {
@@ -516,7 +536,7 @@ fn parse_args() -> Config {
                 eprintln!(
                     "usage: harness --ns-per-tick <float> --output <path.json> \
                      [--threads <n,...>] [--producer-core <n>] [--backend-core <n>] [--ring-capacity <bytes>] \
-                     [--samples <n>] [--sink-file <path>] [--candidate <name>]"
+                     [--samples <n>] [--sink-file <path>] [--sink-raw] [--candidate <name>]"
                 );
                 process::exit(1);
             }
@@ -544,6 +564,7 @@ fn parse_args() -> Config {
             }
         }),
         sink_file,
+        sink_raw,
     }
 }
 
@@ -583,6 +604,7 @@ fn main() {
     let drain_affinity = cfg.backend_core.map(|c| vec![c]);
     let sink = match &cfg.sink_file {
         Some(path) => BenchSink::File(FileSink::truncate(path).expect("ticklog build")),
+        None if cfg.sink_raw => BenchSink::Raw(ticklog::NullSink::new()),
         None => BenchSink::Null(NullSink),
     };
     // Bypass `configure!` (macro hygiene would prevent it from seeing harness
