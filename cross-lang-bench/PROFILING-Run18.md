@@ -100,3 +100,136 @@ raw — как верхний потолок.
    самый большой честный выигрыш drain-пути.
 2. Пересборка с debuginfo → построчная карта `drain_ring`/`format`.
 3. Решение по timestamp: batch/`rdtscp`/принять как есть.
+
+---
+
+# Windows: собственный CLI-профилировщик (Run 18.2)
+
+На Windows доступного профилировщика не было: WPR/WPA требуют админа
+(попытка `0xc5585011`), `VSPerfCmd` в VS2022 отсутствует, VerySleepy — GUI и
+не фильтрует по CPU. Написан `winprof/profiler_cli.c` (~500 строк, dbghelp) и
+прогнаны те же 4 сценария, что и в WSL-части.
+
+## Методика
+
+- Сэмплер: `SuspendThread` всех потоков цели → `GetThreadContext` +
+  `StackWalk64` → `SymFromAddr`. Символы: PDB харнесса рядом с exe +
+  `srv*...msdl`; модули preload'ятся вручную (`EnumProcessModules` +
+  `SymLoadModuleEx`), `SYMOPT_DEFERRED_LOADS` выключен (иначе PDB exe не
+  находится, `err=126`).
+- On-CPU-фильтр: дельты `GetThreadTimes` с накоплением — сэмпл только если
+  поток реально жёг CPU с прошлого раунда; в отчёт идёт точный `cpu_ms`/`cpu%`
+  по каждому потоку (не сэмплы).
+- Реальный интервал ~8–11 мс вместо заданных 5: `Sleep(5)` без
+  `timeBeginPeriod(1)` спит 15.6 мс; `CreateToolhelp32Snapshot` стоил 42 мс
+  и 83% времени раунда (список потоков обновляется раз в 20 раундов);
+  резолв символов кешируется по PC (раньше ~44 мс/раунд).
+- Прогон: `winprof/run_win_cli_prof.ps1`, 4 сценария (render/raw × t1/t8),
+  `--ns-per-tick 0.313132820 --ring-capacity 8388608 --chunk-size 64`,
+  render `--samples 20000`, raw `400000`. Каждый харнесс гонит 3 workload'а
+  подряд (single_int, mixed, string) — отчёт агрегирует все три; границы фаз
+  видны по группам producer-потоков.
+- Артефакты: `winprof/*.prof.txt` (header, top self%, threads с cpu_ms и
+  top-5 функций, топ-40 полных стеков), `winprof/*.json` (throughput/p50/p99),
+  категории self% — `winprof/sum_cats.ps1`.
+
+| отчёт | окно | rounds | samples | всего CPU процесса |
+|---|---|---|---|---|
+| render8m_t1 | 39.8 с | 4601 | 3924  | 82.5 с (2.1 ядра)  |
+| render8m_t8 | 60 с (лимит) | 5003 | 26649 | 532 с (8.9 ядер)   |
+| raw8m_t1    | 32.7 с | 3901 | 3259  | 69.5 с (2.1 ядра)  |
+| raw8m_t8    | 26.8 с | 2296 | 11356 | 253 с (9.4 ядра)   |
+
+## Результат 1. Drain — однопоточный потолок (везде)
+
+cpu_ms из секции threads:
+
+| сценарий | drain cpu / окно | утилизация drain | доля drain от всего CPU |
+|---|---|---|---|
+| render t1 | 41.5 с / 39.8 с | **104%**, почти без yield | 50.3% |
+| render t8 | 60.8 с / 60 с  | **101%**                     | 11.4% |
+| raw t1    | 34.6 с / 32.7 с | 106%, но 52.6% сэмплов drain — idle-yield | 49.8% |
+| raw t8    | 28.4 с / 26.8 с | **106%**, memmove+decode, без простоя | 11.3% |
+
+- **render**: drain не простаивает — кольцо всегда полное, producer'ы ждут
+  (`SwitchToThread`), чистый consumer-bound.
+- **raw t1**: наоборот producer-bound — drain 52.6% сэмплов в
+  `NtDelayExecution` (idle-yield `drain.rs:344`, кольцо пустое), один
+  producer упирается в ~47 M r/s.
+- **raw t8**: 8 producer'ов заполняют кольцо, drain гонит memmove — потолок
+  ~47 M r/s: single_int 47.1 → 47.4 M (+0.7%), а mixed/string, где
+  producer-код тяжелее, выигрывают от параллелизма: +22.5% и +33%.
+
+## Результат 2. Куда идёт CPU (категории self%)
+
+| категория | render t1 | render t8 | raw t1 | raw t8 |
+|---|---|---|---|---|
+| yield/backoff (`SwitchToThread`) | 47.0% | **86.7%** | 28.2% | 65.2% |
+| heap (`RtlAllocateHeap/Free`, `GetProcessHeap`) | 19.0% | 1.6% | — | — |
+| форматирование (`format.rs`, `core::fmt`, flt2dec) | 9.5% | 0.5% | 1.8% | 0.5% |
+| `drain_ring` (декод/разбор) | 6.7% | 0.2% | 12.2% | 5.0% |
+| string-рост (`raw_vec`, `from_utf8_lossy`) | 1.3% | — | 1.5% | 0.4% |
+| memmove/memset | 0.6% | 0.1% | 4.0% | 3.1% |
+| producer-dispatch (харнесс/макрос) | 1.5% | 0.5% | 41.5% | 16.2% |
+| `VCRUNTIME140!_NLG*` (миссимволизация) | 2.4% | 0.2% | 5.5% | 3.3% |
+
+Суммы неточны на ~10–11%: печатаются строки self% ≥0.05%, диффузный хвост
+render-пути в таблицу не попадает.
+
+- render t1, топ-5 функций самого drain: `KERNEL32!GetProcessHeap` 1.5%,
+  `RtlAllocateHeap+0x19ac` 1.3%, `RtlAllocateHeap+0x186d` 1.3%,
+  `RtlFreeHeap+0x183` 1.3%, `RtlFreeHeap+0xf8` 1.2% — heap-цепочка на каждую
+  аллокацию (Rust на Windows живёт в process heap) в топ-5; форматирование
+  размазано по десяткам мелких функций, каждая <0.5%.
+- raw t8, топ-5 drain: `VCRUNTIME140!memmove` 14.9%, `drain_ring+0x76d`
+  10.8%, `drain_ring+0x789` 7.9%, vcruntime-хелперы 7.8+4.0% — memmove из
+  `staging.drain(..pos)` (drain.rs:967) + декод.
+
+## Результат 3. Backoff на Windows жжёт ядра
+
+Топ-1 self всего процесса: `ntdll!NtDelayExecution+0x14` — в render t8
+**83.2%** (это `SwitchToThread` из `std::thread::yield_now`, `src/backoff.rs`
+после 64 pause). Полные стеки: три фазовых producer-closure (+0x1366/+0x1dd6/
++0x896) = 44.9% всех сэмплов render t1 и 82.9% render t8.
+
+- render t8: **86.7% всего CPU процесса — producer-backoff в ядре**, полезная
+  работа (drain) — 11.4%; 461 с из 532 с CPU уходят в yield-ожидание.
+- Масштабирование render **отрицательное**: t8 медленнее t1 на 30–38%
+  (single_int 1.67→1.16, mixed 1.02→0.67, string 1.80→1.11 M r/s), p50 вырос
+  в 1.4–1.7× — 8 producer'ов добавляют только contention кольца и
+  yield-трафика, drain по-прежнему один поток.
+- На WSL этого не было видно: producer-closure 5.10%, ожидание уходило туда,
+  куда user-space perf не смотрит. Сэмплер, берущий стеки и в ядре, показал
+  всю картину.
+
+## Сравнение с WSL (выводы Run 18.1 подтверждены)
+
+- Consumer-bound подтверждён на обеих ОС: WSL — drain ~70% incl, Windows —
+  drain = 100% одного ядра при простаивающих producer'ах.
+- Состав drain-работы совпадает: heap + форматирование. WSL `malloc+cfree`
+  10.6%, Windows heap-цепочка — 19% всех сэмплов и весь топ-5 drain;
+  `GetProcessHeap` на каждую аллокацию дороже glibc malloc.
+- Форматирование: WSL ~32% чётко по функциям, Windows ~9.5% + большой
+  диффузный хвост — та же проблема, другие имена.
+- raw-потолок ~47 M r/s на Windows (memmove+decode) сопоставим с WSL
+  3.5–18.7 M r/s — упирается не в producer.
+
+## Ограничения
+
+- Отчёт агрегирует 3 workload'а; разбить по фазам можно только по группам tid.
+- render t8 не уложился в 60-с окно профилировщика (json полный, отчёт —
+  первые 60 с).
+- Сэмпл ≈ 1 на поток-раунд с CPU-дельтой; точные доли — по cpu_ms, сэмплы
+  дают распределение внутри потока (у busy-потоков топ ограничен
+  256 distinct-функциями).
+
+## Что дальше (по Windows-данным)
+
+1. Подтверждается приоритет Run18: аллокации (heap 19%!) и форматирование в
+   drain — убрать `format!`-фолбэки/`from_utf8_lossy`, inline-буфер вместо
+   String.
+2. Backoff: yield в ядро дорог на Windows — при полном кольце можно
+   перейти на event/wait-примитив или ограничить число ждущих; но это лишь
+   снижает потери, потолок в drain.
+3. render не масштабируется на 8 producer'ов (−30…−38%): контеншн кольца —
+   либо принимать t1-режим как оптимум, либо sharded-кольца.

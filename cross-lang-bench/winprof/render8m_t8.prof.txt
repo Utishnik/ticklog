@@ -1,0 +1,296 @@
+== profiler_cli report ==
+pid=16448 cfg_seconds=60 elapsed_ms=60000 rounds=5003 interval_ms=5 total_samples=26649
+
+== top self (self% >= 0.05) ==
+   self%    incl%   self_n  function
+  83.01%   83.01%    22121  ntdll!NtDelayExecution+0x14
+   2.41%   85.53%      642  ntdll!RtlDelayExecution+0x34
+   0.35%    0.35%       92  ntdll!RtlDelayExecution+0x0
+   0.32%    0.32%       86  KERNEL32!SwitchToThread+0x0
+   0.18%    0.18%       49  KERNEL32!GetProcessHeap+0x0
+   0.18%    0.18%       48  ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x137b
+   0.17%    0.17%       46  VCRUNTIME140!_NLG_Return2+0x408
+   0.16%    0.16%       42  ntdll!RtlAllocateHeap+0x19ac
+   0.15%    0.15%       39  ntdll!RtlFreeHeap+0x183
+   0.15%    0.15%       39  ticklog_rtrb_block!ticklog::drain::drain_ring+0x1116
+   0.12%    0.12%       33  ticklog_rtrb_block!ticklog::format::format_with_spec+0x18c
+   0.10%    0.10%       27  ntdll!RtlFreeHeap+0xf4
+   0.09%    0.09%       25  ntdll!RtlFreeHeap+0xf8
+   0.09%    0.30%       25  ticklog_rtrb_block!std::sys::alloc::windows::process_heap_alloc+0x14
+   0.09%    0.09%       25  ntdll!RtlAllocateHeap+0x186d
+   0.09%    0.09%       25  ntdll!RtlDelayExecution+0x58
+   0.09%    0.09%       24  KERNEL32!GetProcessHeap+0xd
+   0.09%    0.09%       24  ticklog_rtrb_block!core::fmt::write+0x3f
+   0.09%    0.09%       24  KERNELBASE!SwitchToThread+0x2f
+   0.09%    0.09%       24  ntdll!RtlDelayExecution+0x5
+   0.08%    0.08%       22  ntdll!RtlFreeHeap+0x114
+   0.08%    0.08%       21  ticklog_rtrb_block!core::fmt::Formatter::pad_integral+0xba
+   0.08%    0.08%       21  ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x8a8
+   0.08%    0.08%       21  VCRUNTIME140!memmove+0x699
+   0.08%    0.08%       21  ntdll!RtlAllocateHeap+0xb54
+   0.08%    0.08%       20  ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1da9
+   0.08%    0.08%       20  ticklog_rtrb_block!core::num::imp::flt2dec::strategy::grisu::format_shortest_opt+0x254
+   0.08%    0.08%       20  KERNELBASE!SwitchToThread+0x0
+   0.07%    0.07%       19  ntdll!RtlFreeHeap+0x299
+   0.07%    0.07%       19  ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1335
+   0.07%    0.07%       19  KERNEL32!GetProcessHeap+0x9
+   0.07%    0.07%       18  ntdll!RtlAllocateHeap+0x1299
+   0.07%    0.07%       18  ntdll!RtlAllocateHeap+0x136d
+   0.07%    0.07%       18  VCRUNTIME140!_NLG_Return2+0x50a
+   0.07%    0.07%       18  ntdll!RtlDelayExecution+0x1d
+   0.06%    0.06%       17  ntdll!RtlAllocateHeap+0x191a
+   0.06%    0.06%       17  ntdll!RtlDelayExecution+0x22
+   0.06%    0.06%       16  ticklog_rtrb_block!std::sys::alloc::windows::process_heap_alloc+0x0
+   0.06%    0.06%       16  ntdll!RtlAllocateHeap+0x18c2
+   0.06%    0.06%       15  ntdll!NtDelayExecution+0x10
+   0.05%    0.05%       14  ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x872
+   0.05%    0.05%       14  ntdll!RtlDelayExecution+0x57
+   0.05%    0.05%       14  ntdll!RtlAllocateHeap+0x1969
+   0.05%    0.05%       14  ticklog_rtrb_block!ticklog::format::format_unsigned_impl+0xbb
+   0.05%    0.05%       14  KERNELBASE!SwitchToThread+0x14
+   0.05%    0.05%       14  ticklog_rtrb_block!ticklog::drain::drain_ring+0x14ae
+   0.05%    0.05%       14  ticklog_rtrb_block!alloc::fmt::format::format_inner+0x5c
+   0.05%    0.05%       14  VCRUNTIME140!memcpy+0x0
+
+== threads (sorted by thread cpu time) ==
+    cpu_ms     cpu%   samples     samp%  thread
+   60796.9   11.41%      3045   11.43%  ticklog-drain            (tid 7552)
+          1.6% of samples  KERNEL32!GetProcessHeap+0x0
+          1.4% of samples  VCRUNTIME140!_NLG_Return2+0x408
+          1.4% of samples  ntdll!RtlAllocateHeap+0x19ac
+          1.3% of samples  ticklog_rtrb_block!ticklog::drain::drain_ring+0x1116
+          1.3% of samples  ntdll!RtlFreeHeap+0x183
+   28640.6    5.37%      1507    5.65%  tid_24720                (tid 24720)
+         94.2% of samples  ntdll!NtDelayExecution+0x14
+          2.9% of samples  ntdll!RtlDelayExecution+0x34
+          0.3% of samples  ntdll!RtlDelayExecution+0x0
+          0.2% of samples  KERNEL32!SwitchToThread+0x0
+          0.2% of samples  ntdll!RtlDelayExecution+0x5
+   28484.4    5.35%      1503    5.64%  tid_14244                (tid 14244)
+         93.7% of samples  ntdll!NtDelayExecution+0x14
+          2.7% of samples  ntdll!RtlDelayExecution+0x34
+          0.5% of samples  ntdll!RtlDelayExecution+0x0
+          0.3% of samples  KERNEL32!SwitchToThread+0x0
+          0.2% of samples  ntdll!RtlDelayExecution+0x58
+   28171.9    5.29%      1482    5.56%  tid_13268                (tid 13268)
+         93.7% of samples  ntdll!NtDelayExecution+0x14
+          2.9% of samples  ntdll!RtlDelayExecution+0x34
+          0.4% of samples  KERNEL32!SwitchToThread+0x0
+          0.3% of samples  ntdll!RtlDelayExecution+0x0
+          0.2% of samples  ntdll!RtlDelayExecution+0x22
+   28046.9    5.26%      1484    5.57%  tid_4068                 (tid 4068)
+         94.3% of samples  ntdll!NtDelayExecution+0x14
+          3.1% of samples  ntdll!RtlDelayExecution+0x34
+          0.2% of samples  KERNEL32!SwitchToThread+0x0
+          0.1% of samples  ntdll!RtlDelayExecution+0x2f
+          0.1% of samples  ntdll!RtlDelayExecution+0x58
+   27937.5    5.24%      1472    5.52%  tid_23248                (tid 23248)
+         93.3% of samples  ntdll!NtDelayExecution+0x14
+          3.0% of samples  ntdll!RtlDelayExecution+0x34
+          0.5% of samples  ntdll!RtlDelayExecution+0x0
+          0.3% of samples  KERNEL32!SwitchToThread+0x0
+          0.2% of samples  ntdll!RtlDelayExecution+0x5
+   27718.8    5.20%      1458    5.47%  tid_5848                 (tid 5848)
+         93.1% of samples  ntdll!NtDelayExecution+0x14
+          2.5% of samples  ntdll!RtlDelayExecution+0x34
+          0.4% of samples  ntdll!RtlDelayExecution+0x0
+          0.3% of samples  KERNEL32!SwitchToThread+0x0
+          0.2% of samples  ntdll!RtlDelayExecution+0x5
+   27515.6    5.16%      1452    5.45%  tid_24564                (tid 24564)
+         93.2% of samples  ntdll!NtDelayExecution+0x14
+          3.1% of samples  ntdll!RtlDelayExecution+0x34
+          1.0% of samples  ntdll!RtlDelayExecution+0x0
+          0.3% of samples  KERNEL32!SwitchToThread+0x0
+          0.2% of samples  ntdll!RtlDelayExecution+0x57
+   27343.8    5.13%      1443    5.41%  tid_14564                (tid 14564)
+         94.7% of samples  ntdll!NtDelayExecution+0x14
+          2.6% of samples  ntdll!RtlDelayExecution+0x34
+          0.3% of samples  ntdll!RtlDelayExecution+0x0
+          0.3% of samples  KERNEL32!SwitchToThread+0x0
+          0.1% of samples  ntdll!RtlDelayExecution+0x1d
+   16515.6    3.10%       716    2.69%  tid_20936                (tid 20936)
+         94.6% of samples  ntdll!NtDelayExecution+0x14
+          2.9% of samples  ntdll!RtlDelayExecution+0x34
+          0.4% of samples  ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x8a8
+          0.3% of samples  ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x8be
+          0.3% of samples  KERNEL32!SwitchToThread+0x0
+   16421.9    3.08%       710    2.66%  tid_26184                (tid 26184)
+         93.7% of samples  ntdll!NtDelayExecution+0x14
+          2.4% of samples  ntdll!RtlDelayExecution+0x34
+          0.6% of samples  ntdll!RtlDelayExecution+0x0
+          0.6% of samples  KERNEL32!SwitchToThread+0x0
+          0.4% of samples  ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x8a8
+   16312.5    3.06%       705    2.65%  tid_27252                (tid 27252)
+         92.5% of samples  ntdll!NtDelayExecution+0x14
+          3.8% of samples  ntdll!RtlDelayExecution+0x34
+          0.6% of samples  ntdll!RtlDelayExecution+0x0
+          0.6% of samples  ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x8a8
+          0.4% of samples  KERNEL32!SwitchToThread+0x0
+   16171.9    3.03%       699    2.62%  tid_3680                 (tid 3680)
+         94.4% of samples  ntdll!NtDelayExecution+0x14
+          2.3% of samples  ntdll!RtlDelayExecution+0x34
+          0.6% of samples  ntdll!RtlDelayExecution+0x0
+          0.4% of samples  ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x8a8
+          0.4% of samples  KERNEL32!SwitchToThread+0x0
+   15750.0    2.96%       677    2.54%  tid_17100                (tid 17100)
+         94.1% of samples  ntdll!NtDelayExecution+0x14
+          2.5% of samples  ntdll!RtlDelayExecution+0x34
+          0.6% of samples  KERNEL32!SwitchToThread+0x0
+          0.3% of samples  ntdll!RtlDelayExecution+0x0
+          0.3% of samples  ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x8a8
+   15609.4    2.93%       671    2.52%  tid_23260                (tid 23260)
+         93.9% of samples  ntdll!NtDelayExecution+0x14
+          3.0% of samples  ntdll!RtlDelayExecution+0x34
+          0.6% of samples  KERNEL32!SwitchToThread+0x0
+          0.6% of samples  ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x872
+          0.3% of samples  KERNELBASE!SwitchToThread+0x14
+   15546.9    2.92%       665    2.50%  tid_14748                (tid 14748)
+         92.9% of samples  ntdll!NtDelayExecution+0x14
+          2.4% of samples  ntdll!RtlDelayExecution+0x34
+          0.9% of samples  ntdll!RtlDelayExecution+0x0
+          0.5% of samples  ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x8bb
+          0.3% of samples  KERNELBASE!SwitchToThread+0x2f
+   15265.6    2.86%       651    2.44%  tid_24224                (tid 24224)
+         93.5% of samples  ntdll!NtDelayExecution+0x14
+          2.5% of samples  ntdll!RtlDelayExecution+0x34
+          0.8% of samples  ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x8a8
+          0.3% of samples  ntdll!NtDelayExecution+0x10
+          0.3% of samples  ntdll!RtlDelayExecution+0x58
+   15109.4    2.84%       792    2.97%  tid_27100                (tid 27100)
+         95.1% of samples  ntdll!NtDelayExecution+0x14
+          2.1% of samples  ntdll!RtlDelayExecution+0x34
+          0.5% of samples  KERNEL32!SwitchToThread+0x0
+          0.3% of samples  ntdll!RtlDelayExecution+0x0
+          0.3% of samples  KERNELBASE!SwitchToThread+0x2f
+   15109.4    2.84%       791    2.97%  tid_7196                 (tid 7196)
+         92.9% of samples  ntdll!NtDelayExecution+0x14
+          2.4% of samples  ntdll!RtlDelayExecution+0x34
+          0.6% of samples  KERNEL32!SwitchToThread+0x0
+          0.5% of samples  ntdll!RtlDelayExecution+0x0
+          0.4% of samples  ntdll!RtlDelayExecution+0x22
+   15109.4    2.84%       789    2.96%  tid_6364                 (tid 6364)
+         92.6% of samples  ntdll!NtDelayExecution+0x14
+          3.0% of samples  ntdll!RtlDelayExecution+0x34
+          0.5% of samples  KERNEL32!SwitchToThread+0x0
+          0.4% of samples  ntdll!RtlDelayExecution+0x0
+          0.3% of samples  ntdll!RtlDelayExecution+0x58
+   15109.4    2.84%       789    2.96%  tid_19440                (tid 19440)
+         93.5% of samples  ntdll!NtDelayExecution+0x14
+          1.8% of samples  ntdll!RtlDelayExecution+0x34
+          0.5% of samples  ntdll!RtlDelayExecution+0x0
+          0.4% of samples  ntdll!NtDelayExecution+0x12
+          0.3% of samples  KERNELBASE!SwitchToThread+0x14
+   15078.1    2.83%       790    2.96%  tid_25340                (tid 25340)
+         94.1% of samples  ntdll!NtDelayExecution+0x14
+          2.2% of samples  ntdll!RtlDelayExecution+0x34
+          0.5% of samples  KERNEL32!SwitchToThread+0x0
+          0.3% of samples  ntdll!RtlDelayExecution+0x2f
+          0.3% of samples  KERNELBASE!SwitchToThread+0x2f
+   15062.5    2.83%       787    2.95%  tid_15676                (tid 15676)
+         93.9% of samples  ntdll!NtDelayExecution+0x14
+          2.3% of samples  ntdll!RtlDelayExecution+0x34
+          0.4% of samples  ntdll!RtlDelayExecution+0x22
+          0.3% of samples  ntdll!RtlDelayExecution+0x49
+          0.3% of samples  KERNELBASE!SwitchToThread+0x14
+   14953.1    2.81%       782    2.93%  tid_25068                (tid 25068)
+         93.2% of samples  ntdll!NtDelayExecution+0x14
+          2.9% of samples  ntdll!RtlDelayExecution+0x34
+          0.5% of samples  ntdll!RtlDelayExecution+0x0
+          0.5% of samples  KERNEL32!SwitchToThread+0x0
+          0.3% of samples  ntdll!RtlDelayExecution+0x1d
+   14937.5    2.80%       781    2.93%  tid_14148                (tid 14148)
+         92.3% of samples  ntdll!NtDelayExecution+0x14
+          3.2% of samples  ntdll!RtlDelayExecution+0x34
+          0.8% of samples  KERNEL32!SwitchToThread+0x0
+          0.3% of samples  ntdll!RtlDelayExecution+0x0
+          0.3% of samples  KERNELBASE!SwitchToThread+0x2f
+      46.9    0.01%         2    0.01%  main                     (tid 22320)
+        100.0% of samples  ntdll!NtWaitForSingleObject+0x14
+      31.2    0.01%         2    0.01%  tid_6064                 (tid 6064)
+        100.0% of samples  ntdll!ZwWaitForWorkViaWorkerFactory+0x14
+      31.2    0.01%         2    0.01%  tid_24440                (tid 24440)
+        100.0% of samples  ntdll!ZwWaitForWorkViaWorkerFactory+0x14
+      31.2    0.01%         2    0.01%  tid_3668                 (tid 3668)
+        100.0% of samples  ntdll!ZwWaitForWorkViaWorkerFactory+0x14
+
+== top stacks (top 40) ==
+
+[41.53%] ntdll!NtDelayExecution+0x14<-ntdll!RtlDelayExecution+0x34<-KERNELBASE!SwitchToThread+0x1b<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1366<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[22.10%] ntdll!NtDelayExecution+0x14<-ntdll!RtlDelayExecution+0x34<-KERNELBASE!SwitchToThread+0x1b<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1dd6<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[19.32%] ntdll!NtDelayExecution+0x14<-ntdll!RtlDelayExecution+0x34<-KERNELBASE!SwitchToThread+0x1b<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x896<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 1.26%] ntdll!RtlDelayExecution+0x34<-KERNELBASE!SwitchToThread+0x1b<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1366<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.59%] ntdll!RtlDelayExecution+0x34<-KERNELBASE!SwitchToThread+0x1b<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1dd6<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.56%] ntdll!RtlDelayExecution+0x34<-KERNELBASE!SwitchToThread+0x1b<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x896<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.18%] ntdll!RtlDelayExecution+0x0<-KERNELBASE!SwitchToThread+0x1b<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1366<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.18%] ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x137b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.15%] ticklog_rtrb_block!ticklog::drain::drain_ring+0x1116<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.13%] KERNEL32!SwitchToThread+0x0<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1366<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.11%] KERNEL32!SwitchToThread+0x0<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1dd6<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.09%] ntdll!RtlDelayExecution+0x0<-KERNELBASE!SwitchToThread+0x1b<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x896<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.09%] KERNEL32!SwitchToThread+0x0<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x896<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.08%] ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x8a8<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.08%] VCRUNTIME140!memmove+0x699<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x175<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.08%] ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1da9<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.08%] ticklog_rtrb_block!core::num::imp::flt2dec::strategy::grisu::format_shortest_opt+0x254<-ticklog_rtrb_block!core::fmt::float::float_to_decimal_common_shortest<f64>+0x1ed<-ticklog_rtrb_block!core::fmt::write+0x15e<-ticklog_rtrb_block!alloc::fmt::format::format_inner+0x12f<-ticklog_rtrb_block!ticklog::format::format_float_impl+0xdb<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x1801<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.07%] ntdll!RtlDelayExecution+0x0<-KERNELBASE!SwitchToThread+0x1b<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1dd6<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.07%] ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1335<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.07%] ntdll!NtDelayExecution+0x14<-ntdll!RtlDelayExecution+0x34<-KERNELBASE!SwitchToThread+0x1b<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x1e5<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.07%] VCRUNTIME140!_NLG_Return2+0x50a<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x10f6<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.06%] ticklog_rtrb_block!core::fmt::Formatter::pad_integral+0xba<-ticklog_rtrb_block!core::fmt::num::imp::impl$15::fmt+0x106<-ticklog_rtrb_block!core::fmt::write+0x15e<-ticklog_rtrb_block!alloc::fmt::format::format_inner+0x12f<-ticklog_rtrb_block!ticklog::format::format_unsigned_impl+0xb7<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x130d<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.06%] ticklog_rtrb_block!core::fmt::write+0x3f<-ticklog_rtrb_block!alloc::fmt::format::format_inner+0x12f<-ticklog_rtrb_block!ticklog::format::format_unsigned_impl+0xb7<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x130d<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.05%] ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x872<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.05%] ticklog_rtrb_block!ticklog::drain::drain_ring+0x14ae<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.05%] ntdll!RtlDelayExecution+0x5<-KERNELBASE!SwitchToThread+0x1b<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1366<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.05%] ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1deb<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.05%] ntdll!RtlAllocateHeap+0x19ac<-ntdll!RtlAllocateHeap+0xbf4<-ntdll!RtlAllocateHeap+0xabb<-ticklog_rtrb_block!alloc::raw_vec::RawVecInner::finish_grow<alloc::alloc::Global>+0x63<-ticklog_rtrb_block!alloc::raw_vec::impl$4::reserve::do_reserve_and_handle<alloc::alloc::Global>+0x42<-ticklog_rtrb_block!alloc::string::impl$63::write_str+0x5d<-ticklog_rtrb_block!core::fmt::num::imp::impl$15::fmt+0x106<-ticklog_rtrb_block!core::fmt::write+0x15e<-ticklog_rtrb_block!alloc::fmt::format::format_inner+0x12f<-ticklog_rtrb_block!ticklog::format::format_unsigned_impl+0xb7<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x130d<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.05%] ntdll!RtlDelayExecution+0x58<-KERNELBASE!SwitchToThread+0x1b<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1366<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.04%] ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1398<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.04%] ntdll!RtlFreeHeap+0x183<-ticklog_rtrb_block!ticklog::format::format_unsigned_impl+0x3b4<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x130d<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.04%] KERNELBASE!SwitchToThread+0x2f<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1dd6<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.04%] ticklog_rtrb_block!ticklog::drain::drain_ring+0x14c5<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.04%] ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x13e5<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.04%] ticklog_rtrb_block!ticklog::drain::drain_ring+0xc82<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.04%] ticklog_rtrb_block!ticklog::drain::drain_ring+0x10eb<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.04%] ticklog_rtrb_block!ticklog::drain::drain_ring+0x14aa<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.04%] ntdll!RtlAllocateHeap+0x19ac<-ntdll!RtlAllocateHeap+0xbf4<-ntdll!RtlAllocateHeap+0xabb<-ticklog_rtrb_block!ticklog::format::format_str+0x187<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x12c8<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.04%] KERNELBASE!SwitchToThread+0x0<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1366<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.04%] ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1e08<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c

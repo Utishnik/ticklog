@@ -1,0 +1,515 @@
+== profiler_cli report ==
+pid=18368 cfg_seconds=60 elapsed_ms=39781 rounds=4601 interval_ms=5 total_samples=3924
+
+== top self (self% >= 0.05) ==
+   self%    incl%   self_n  function
+  45.23%   45.23%     1775  ntdll!NtDelayExecution+0x14
+   0.92%   46.23%       36  ntdll!RtlDelayExecution+0x34
+   0.76%    0.76%       30  KERNEL32!GetProcessHeap+0x0
+   0.64%    0.64%       25  ntdll!RtlAllocateHeap+0x186d
+   0.64%    0.64%       25  ntdll!RtlAllocateHeap+0x19ac
+   0.64%    0.64%       25  ntdll!RtlFreeHeap+0x183
+   0.59%    0.59%       23  ntdll!RtlFreeHeap+0xf8
+   0.56%    0.56%       22  ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1da9
+   0.51%    0.51%       20  ticklog_rtrb_block!ticklog::format::format_with_spec+0x18c
+   0.51%    0.51%       20  ntdll!RtlFreeHeap+0xf4
+   0.48%    0.48%       19  VCRUNTIME140!_NLG_Return2+0x408
+   0.38%    0.38%       15  KERNEL32!SwitchToThread+0x0
+   0.38%    0.38%       15  KERNEL32!GetProcessHeap+0xd
+   0.38%    0.38%       15  ticklog_rtrb_block!ticklog::drain::drain_ring+0x1116
+   0.36%    1.12%       14  ticklog_rtrb_block!std::sys::alloc::windows::process_heap_alloc+0x14
+   0.36%    0.36%       14  VCRUNTIME140!_NLG_Return2+0x50a
+   0.36%    0.36%       14  ntdll!RtlFreeHeap+0x299
+   0.36%    0.36%       14  ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1335
+   0.36%    0.36%       14  ntdll!RtlFreeHeap+0xdd
+   0.33%    0.33%       13  ntdll!RtlAllocateHeap+0x136d
+   0.31%    0.31%       12  ntdll!RtlAllocateHeap+0x1365
+   0.31%    0.31%       12  ntdll!RtlAllocateHeap+0x19a5
+   0.28%    0.28%       11  ntdll!RtlAllocateHeap+0xcb2
+   0.28%    0.28%       11  ntdll!RtlAllocateHeap+0xb54
+   0.25%    0.25%       10  ntdll!RtlAllocateHeap+0x195d
+   0.25%    0.25%       10  ticklog_rtrb_block!core::fmt::write+0x3f
+   0.25%    0.25%       10  ticklog_rtrb_block!ticklog::drain::drain_ring+0x10eb
+   0.25%    0.25%       10  VCRUNTIME140!_NLG_Return2+0x511
+   0.25%    0.25%       10  ticklog_rtrb_block!alloc::fmt::format::format_inner+0x5c
+   0.25%    0.25%       10  ntdll!RtlAllocateHeap+0x1969
+   0.25%    0.25%       10  ticklog_rtrb_block!core::fmt::write+0x43
+   0.25%    0.25%       10  ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x872
+   0.25%    0.25%       10  ticklog_rtrb_block!core::str::lossy::impl$4::next+0x40
+   0.23%    0.23%        9  ntdll!RtlAllocateHeap+0x18f5
+   0.20%    0.20%        8  ticklog_rtrb_block!ticklog::format::format_unsigned_impl+0xbf
+   0.20%    0.20%        8  ntdll!RtlFreeHeap+0x1ad
+   0.20%    0.20%        8  VCRUNTIME140!memcpy+0x0
+   0.20%    0.20%        8  ntdll!RtlFreeHeap+0x114
+   0.20%    0.20%        8  ntdll!RtlAllocateHeap+0xbef
+   0.20%    0.20%        8  VCRUNTIME140!memmove+0x699
+   0.20%    0.20%        8  ticklog_rtrb_block!core::fmt::write+0x1a6
+   0.18%    0.18%        7  ticklog_rtrb_block!alloc::string::impl$63::write_str+0x2d
+   0.18%    0.18%        7  ntdll!RtlFreeHeap+0x102
+   0.18%    0.18%        7  ntdll!RtlAllocateHeap+0x1211
+   0.18%    0.18%        7  ntdll!RtlAllocateHeap+0x191a
+   0.18%    0.18%        7  ticklog_rtrb_block!core::fmt::num::imp::impl$15::fmt+0xb4
+   0.18%    0.18%        7  ntdll!RtlAllocateHeap+0x1299
+   0.18%    0.18%        7  ticklog_rtrb_block!std::sys::alloc::windows::process_heap_alloc+0x0
+   0.18%    0.18%        7  ticklog_rtrb_block!alloc::string::impl$63::write_str+0x46
+   0.18%    0.18%        7  ntdll!RtlAllocateHeap+0x18d2
+   0.18%    0.99%        7  ticklog_rtrb_block!ticklog::format::format_with_spec+0x180
+   0.15%    0.15%        6  ntdll!RtlAllocateHeap+0xbc3
+   0.15%    0.15%        6  KERNEL32!GetProcessHeap+0x9
+   0.15%    0.15%        6  ntdll!RtlAllocateHeap+0xab4
+   0.15%    0.15%        6  ticklog_rtrb_block!core::fmt::write+0x54
+   0.15%    0.15%        6  ntdll!RtlFreeHeap+0x10a
+   0.15%    0.15%        6  ntdll!RtlFreeHeap+0x39a
+   0.15%    0.15%        6  ticklog_rtrb_block!core::num::imp::flt2dec::strategy::grisu::format_shortest_opt+0x265
+   0.15%    0.15%        6  ntdll!RtlFreeHeap+0x10e
+   0.15%    0.15%        6  ticklog_rtrb_block!ticklog::drain::drain_ring+0x10ab
+   0.15%    0.15%        6  ntdll!RtlAllocateHeap+0x1280
+   0.15%    0.15%        6  ntdll!RtlFreeHeap+0x16d
+   0.15%    0.15%        6  ntdll!RtlAllocateHeap+0x126e
+   0.15%    0.15%        6  ticklog_rtrb_block!ticklog::format::format_unsigned_impl+0xbb
+   0.15%    0.15%        6  ntdll!RtlAllocateHeap+0x1998
+   0.15%    0.15%        6  ntdll!RtlFreeHeap+0x14f
+   0.15%    0.15%        6  ticklog_rtrb_block!core::num::imp::flt2dec::strategy::grisu::format_shortest_opt+0x254
+   0.15%    0.15%        6  KERNEL32!HeapFree+0x0
+   0.15%    0.15%        6  VCRUNTIME140!_NLG_Return2+0x40b
+   0.15%    0.15%        6  ticklog_rtrb_block!ticklog::drain::drain_ring+0x10b9
+   0.15%    0.15%        6  ticklog_rtrb_block!core::fmt::float::float_to_decimal_common_shortest<f64>+0x1f8
+   0.15%    0.15%        6  ntdll!RtlAllocateHeap+0x12fb
+   0.15%    0.15%        6  ntdll!RtlAllocateHeap+0xc9c
+   0.15%    0.15%        6  ticklog_rtrb_block!ticklog::drain::drain_ring+0x15a5
+   0.13%    0.13%        5  ntdll!RtlAllocateHeap+0xbbb
+   0.13%    0.13%        5  ntdll!RtlFreeHeap+0x117
+   0.13%    0.13%        5  ticklog_rtrb_block!ticklog::drain::drain_ring+0xbce
+   0.13%    0.13%        5  ntdll!RtlAllocateHeap+0x1213
+   0.13%    0.13%        5  ticklog_rtrb_block!core::str::lossy::impl$4::next+0x182
+   0.13%    0.13%        5  ntdll!RtlAllocateHeap+0x194f
+   0.13%    0.13%        5  KERNELBASE!SwitchToThread+0x0
+   0.13%    0.13%        5  ticklog_rtrb_block!ticklog::drain::drain_ring+0x1474
+   0.13%    0.13%        5  ticklog_rtrb_block!ticklog::drain::drain_ring+0x17b2
+   0.13%    0.13%        5  VCRUNTIME140!_NLG_Return2+0x4f7
+   0.13%    0.13%        5  ticklog_rtrb_block!ticklog::drain::drain_ring+0x110b
+   0.13%    0.13%        5  ntdll!RtlFreeHeap+0x388
+   0.13%    0.13%        5  ntdll!RtlFreeHeap+0x0
+   0.13%    0.13%        5  ticklog_rtrb_block!ticklog::drain::drain_ring+0x852
+   0.13%    0.13%        5  ticklog_rtrb_block!memcpy+0x0
+   0.13%    0.13%        5  VCRUNTIME140!_NLG_Return2+0x3ea
+   0.13%    0.13%        5  ntdll!RtlAllocateHeap+0xbdd
+   0.13%    0.13%        5  ticklog_rtrb_block!ticklog::drain::drain_ring+0xc5e
+   0.13%    0.13%        5  ntdll!RtlAllocateHeap+0x1219
+   0.13%    0.13%        5  ntdll!RtlAllocateHeap+0x130c
+   0.13%    0.13%        5  ticklog_rtrb_block!core::fmt::impl$12::pad_integral::write_prefix+0x0
+   0.13%    0.13%        5  ntdll!RtlAllocateHeap+0x1981
+   0.10%    0.10%        4  ntdll!RtlAllocateHeap+0xb2b
+   0.10%    0.38%        4  ticklog_rtrb_block!ticklog::format::format_str+0x28f
+   0.10%    0.10%        4  ntdll!RtlAllocateHeap+0x1889
+   0.10%    0.10%        4  ticklog_rtrb_block!core::fmt::num::imp::impl$15::fmt+0x78
+   0.10%    0.10%        4  ticklog_rtrb_block!core::fmt::write+0x2f
+   0.10%    0.10%        4  ntdll!ZwWaitForWorkViaWorkerFactory+0x14
+   0.10%    0.10%        4  ntdll!RtlFreeHeap+0xbf
+   0.10%    0.10%        4  ticklog_rtrb_block!core::fmt::num::imp::impl$15::fmt+0x0
+   0.10%    0.10%        4  ntdll!RtlAllocateHeap+0xa
+   0.10%    0.10%        4  ticklog_rtrb_block!ticklog_cross_lang_harness::impl$1::accept+0x0
+   0.10%    0.10%        4  ticklog_rtrb_block!ticklog::drain::drain_ring+0x835
+   0.10%    0.10%        4  ticklog_rtrb_block!alloc::raw_vec::RawVecInner::finish_grow<alloc::alloc::Global>+0x48
+   0.10%    0.10%        4  ticklog_rtrb_block!ticklog::drain::drain_ring+0xccb
+   0.10%    0.10%        4  ticklog_rtrb_block!std::sys::alloc::windows::process_heap_alloc+0x26
+   0.10%    0.10%        4  ticklog_rtrb_block!ticklog::format::format_str+0x64
+   0.10%    0.10%        4  ntdll!RtlFreeHeap+0xc8
+   0.10%    0.10%        4  ntdll!RtlFreeHeap+0x17
+   0.10%    0.10%        4  ticklog_rtrb_block!core::fmt::num::imp::impl$15::fmt+0x4
+   0.10%    0.10%        4  ticklog_rtrb_block!core::fmt::num::imp::impl$15::fmt+0x1
+   0.10%    0.10%        4  ticklog_rtrb_block!ticklog::drain::drain_ring+0x14aa
+   0.10%    0.10%        4  ntdll!RtlAllocateHeap+0x12e7
+   0.10%    0.10%        4  ticklog_rtrb_block!core::fmt::write+0x152
+   0.10%    0.10%        4  ntdll!RtlAllocateHeap+0xcc3
+   0.10%   23.32%        4  ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1366
+   0.10%    0.10%        4  ntdll!RtlFreeHeap+0xff
+   0.10%    0.10%        4  VCRUNTIME140!_NLG_Return2+0x706
+   0.10%    0.10%        4  ntdll!RtlAllocateHeap+0x19a8
+   0.10%    0.10%        4  ntdll!RtlAllocateHeap+0x1377
+   0.10%    0.10%        4  ntdll!RtlAllocateHeap+0xce9
+   0.10%    0.10%        4  ticklog_rtrb_block!ticklog::drain::drain_ring+0x14ae
+   0.10%    0.10%        4  ntdll!RtlAllocateHeap+0x1963
+   0.10%    0.10%        4  ticklog_rtrb_block!alloc::fmt::format::format_inner+0x143
+   0.10%    0.10%        4  ntdll!RtlAllocateHeap+0xb10
+   0.10%    0.10%        4  ntdll!RtlFreeHeap+0x19
+   0.10%    0.10%        4  ticklog_rtrb_block!alloc::string::impl$63::write_str+0x0
+   0.10%    0.10%        4  ticklog_rtrb_block!alloc::fmt::format::format_inner+0x10d
+   0.10%    0.10%        4  ticklog_rtrb_block!core::fmt::impl$12::pad_integral::write_prefix+0x1c
+   0.10%    0.10%        4  ticklog_rtrb_block!ticklog::drain::drain_ring+0x14b1
+   0.10%    0.10%        4  ticklog_rtrb_block!core::fmt::Formatter::pad_integral+0xba
+   0.10%    0.10%        4  VCRUNTIME140!_NLG_Return2+0x3e3
+   0.10%    0.10%        4  ticklog_rtrb_block!alloc::string::impl$63::write_str+0x30
+   0.10%    0.10%        4  ticklog_rtrb_block!core::str::lossy::impl$4::next+0x0
+   0.10%    0.10%        4  ntdll!RtlAllocateHeap+0x137e
+   0.10%    0.10%        4  ntdll!RtlFreeHeap+0x3d
+   0.10%    0.10%        4  ticklog_rtrb_block!ticklog::format::format_with_spec+0x18b
+   0.10%    0.10%        4  ntdll!RtlAllocateHeap+0x2e
+   0.10%    0.10%        4  ntdll!RtlFreeHeap+0x105
+   0.10%    0.10%        4  ticklog_rtrb_block!core::fmt::write+0x1b0
+   0.08%    0.08%        3  ticklog_rtrb_block!core::num::imp::flt2dec::strategy::grisu::format_shortest_opt+0x258
+   0.08%    0.08%        3  ntdll!RtlFreeHeap+0x13
+   0.08%    0.08%        3  ticklog_rtrb_block!alloc::raw_vec::RawVecInner::finish_grow<alloc::alloc::Global>+0x81
+   0.08%    0.08%        3  ticklog_rtrb_block!alloc::fmt::format::format_inner+0x34
+   0.08%    0.08%        3  ntdll!RtlFreeHeap+0x11a
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::format::format_with_spec+0x191
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0xb32
+   0.08%    0.08%        3  ticklog_rtrb_block!core::fmt::impl$12::pad_integral::write_prefix+0x5f
+   0.08%    0.08%        3  ntdll!RtlAllocateHeap+0xb1d
+   0.08%    0.08%        3  ntdll!RtlAllocateHeap+0x193d
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0x10e5
+   0.08%    0.08%        3  VCRUNTIME140!_NLG_Return2+0x4fc
+   0.08%    0.61%        3  ticklog_rtrb_block!core::fmt::Formatter::pad_integral+0x9d
+   0.08%    0.08%        3  ntdll!RtlAllocateHeap+0xb39
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0x186e
+   0.08%    0.08%        3  ntdll!RtlFreeHeap+0x5b
+   0.08%    0.08%        3  ntdll!RtlAllocateHeap+0xb40
+   0.08%    0.08%        3  ticklog_rtrb_block!alloc::fmt::format::format_inner+0x138
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0x14c5
+   0.08%    0.08%        3  ticklog_rtrb_block!core::fmt::write+0xc
+   0.08%    0.08%        3  ntdll!RtlFreeHeap+0xf1
+   0.08%    0.08%        3  ntdll!RtlFreeHeap+0xb8
+   0.08%    0.33%        3  ticklog_rtrb_block!ticklog::format::format_unsigned_impl+0x3a6
+   0.08%    0.08%        3  ticklog_rtrb_block!core::fmt::num::imp::impl$15::fmt+0x2
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::format::format_str+0x279
+   0.08%    0.08%        3  ticklog_rtrb_block!core::fmt::Formatter::pad_formatted_parts+0x7
+   0.08%    0.08%        3  ticklog_rtrb_block!alloc::raw_vec::RawVecInner::finish_grow<alloc::alloc::Global>+0x3
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0xe66
+   0.08%    0.08%        3  ntdll!RtlAllocateHeap+0x17aa
+   0.08%    0.08%        3  ntdll!RtlAllocateHeap+0xcb5
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0xefc
+   0.08%    0.08%        3  ntdll!RtlFreeHeap+0x3c2
+   0.08%    0.08%        3  KERNELBASE!SwitchToThread+0x2f
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0x10b4
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::format::format_with_spec+0x18f
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0xe9f
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0x15e1
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0x15f1
+   0.08%    0.08%        3  ticklog_rtrb_block!core::fmt::num::imp::impl$15::fmt+0xac
+   0.08%    0.08%        3  ntdll!RtlAllocateHeap+0x1368
+   0.08%    0.08%        3  ntdll!RtlAllocateHeap+0x128f
+   0.08%    0.08%        3  VCRUNTIME140!_NLG_Return2+0x430
+   0.08%    0.08%        3  ntdll!RtlAllocateHeap+0x13a4
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0x11c5
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0xbf4
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0xc69
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0x185e
+   0.08%    0.08%        3  ticklog_rtrb_block!alloc::fmt::format::format_inner+0xbc
+   0.08%    0.08%        3  ntdll!RtlFreeHeap+0xc5
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::format::format_with_spec+0x4
+   0.08%    0.08%        3  ntdll!RtlAllocateHeap+0x1215
+   0.08%    0.08%        3  ticklog_rtrb_block!core::fmt::write+0xa
+   0.08%    0.08%        3  ntdll!RtlFreeHeap+0x2c
+   0.08%    4.05%        3  ticklog_rtrb_block!ticklog::format::format_str+0x29e
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::format::format_with_spec+0x29
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0x11e6
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::format::format_float_impl+0xdf
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0xd97
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0x1119
+   0.08%    0.08%        3  VCRUNTIME140!_NLG_Return2+0x6f6
+   0.08%    0.08%        3  ticklog_rtrb_block!core::str::lossy::impl$4::next+0x9
+   0.08%    0.08%        3  ntdll!RtlFreeHeap+0x1f7
+   0.08%    0.08%        3  ntdll!RtlAllocateHeap+0x18c2
+   0.08%    0.08%        3  ntdll!RtlAllocateHeap+0xba5
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::format::format_with_spec+0x25
+   0.08%    0.08%        3  ticklog_rtrb_block!alloc::raw_vec::RawVecInner::finish_grow<alloc::alloc::Global>+0x85
+   0.08%    0.08%        3  ntdll!RtlAllocateHeap+0xbeb
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0x153e
+   0.08%    0.08%        3  ntdll!RtlFreeHeap+0x15
+   0.08%    0.08%        3  ticklog_rtrb_block!core::str::lossy::impl$4::next+0x32
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::format::format_with_spec+0x18d
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0x16b4
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::format::format_with_spec+0x159
+   0.08%    0.08%        3  ntdll!RtlAllocateHeap+0xb19
+   0.08%    0.08%        3  ticklog_rtrb_block!core::fmt::Formatter::pad_formatted_parts+0x0
+   0.08%    1.78%        3  ticklog_rtrb_block!core::fmt::Formatter::write_formatted_parts+0x80
+   0.08%    0.08%        3  ntdll!RtlDelayExecution+0x0
+   0.08%   14.42%        3  ticklog_rtrb_block!alloc::fmt::format::format_inner+0x12f
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::format::format_float_impl+0xe7
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0xf56
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0xf0a
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0xb14
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0xda0
+   0.08%    0.08%        3  ntdll!RtlAllocateHeap+0xb72
+   0.08%    0.08%        3  ticklog_rtrb_block!core::fmt::write+0x1
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0x10a4
+   0.08%    0.08%        3  ntdll!RtlFreeHeap+0xa4
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::format::format_with_spec+0x4d
+   0.08%   11.37%        3  ntdll!RtlAllocateHeap+0xabb
+   0.08%    0.08%        3  ticklog_rtrb_block!std::sys::alloc::windows::process_heap_alloc+0x1
+   0.08%    0.08%        3  ticklog_rtrb_block!ticklog::drain::drain_ring+0x16ac
+   0.05%    0.05%        2  ticklog_rtrb_block!alloc::string::impl$63::write_str+0x64
+   0.05%    0.05%        2  ticklog_rtrb_block!core::fmt::num::imp::impl$15::fmt+0xa5
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0xf24
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::format::format_with_spec+0x2
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0x1607
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0xcee
+   0.05%    0.05%        2  ticklog_rtrb_block!core::num::imp::flt2dec::strategy::grisu::format_shortest_opt+0x10c
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::format::format_with_spec+0x6
+   0.05%    0.05%        2  ticklog_rtrb_block!core::fmt::num::imp::impl$15::fmt+0xaf
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0xcb0
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0x820
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0xc33
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x1311
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::fmt_f64+0x0
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x124e
+   0.05%    0.05%        2  ticklog_rtrb_block!core::fmt::float::float_to_decimal_common_shortest<f64>+0x250
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0x752
+   0.05%    0.05%        2  VCRUNTIME140!_NLG_Return2+0x48a
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0x831
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0xdf3
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::fmt_u64+0x4
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0xbea
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x128c
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::format::format_with_spec+0x187
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x1263
+   0.05%    0.05%        2  ticklog_rtrb_block!alloc::fmt::format::format_inner+0x5
+   0.05%    0.05%        2  VCRUNTIME140!_NLG_Return2+0x6c9
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0xde0
+   0.05%    0.05%        2  ticklog_rtrb_block!alloc::string::impl$63::write_str+0x47
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0x82d
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::format::format_with_spec+0x48
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0xb0a
+   0.05%    0.51%        2  ticklog_rtrb_block!ticklog::format::format_str+0x1a1
+   0.05%    0.05%        2  ticklog_rtrb_block!core::fmt::float::float_to_decimal_common_shortest<f64>+0xaa
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0x17f6
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0xad1
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::format::format_unsigned_impl+0x98
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::format::format_with_spec+0x197
+   0.05%    0.05%        2  ticklog_rtrb_block!core::fmt::num::imp::impl$15::fmt+0xd7
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0x10ae
+   0.05%    0.05%        2  ntdll!NtDelayExecution+0x12
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0xad3
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0xcb3
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0x1ab7
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0x103e
+   0.05%    0.05%        2  ticklog_rtrb_block!core::str::lossy::impl$4::next+0x15f
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::format::format_str+0x2a8
+   0.05%    0.05%        2  ticklog_rtrb_block!core::fmt::Formatter::pad_integral+0x35
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x120a
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x18aa
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x21
+   0.05%    0.05%        2  ticklog_rtrb_block!core::fmt::write+0x1a5
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x1862
+   0.05%    0.05%        2  VCRUNTIME140!_NLG_Return2+0x47f
+   0.05%    0.05%        2  ticklog_rtrb_block!alloc::raw_vec::impl$4::reserve::do_reserve_and_handle<alloc::alloc::Global>+0x26
+   0.05%    0.05%        2  ticklog_rtrb_block!core::num::imp::flt2dec::digits_to_dec_str+0x16
+   0.05%    0.05%        2  ticklog_rtrb_block!alloc::raw_vec::RawVecInner::finish_grow<alloc::alloc::Global>+0x79
+   0.05%    0.05%        2  ticklog_rtrb_block!alloc::fmt::format::format_inner+0x88
+   0.05%    0.05%        2  ticklog_rtrb_block!std::sys::alloc::windows::process_heap_alloc+0x2
+   0.05%    0.05%        2  KERNELBASE!SwitchToThread+0x20
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x1b
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x1261
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0x15d1
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0xbfa
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0xc71
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x19a2
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0x11fa
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0x807
+   0.05%    0.05%        2  VCRUNTIME140!_NLG_Return2+0x3e0
+   0.05%    0.05%        2  VCRUNTIME140!_NLG_Return2+0x4fa
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x1200
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::format::format_unsigned_impl+0x23
+   0.05%    0.05%        2  ticklog_rtrb_block!core::fmt::Formatter::write_formatted_parts+0x23c
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0xbb2
+   0.05%    0.05%        2  ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0xe63
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x187c
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0xb5b
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x6
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0xc6b
+   0.05%    0.05%        2  ticklog_rtrb_block!alloc::raw_vec::RawVecInner::finish_grow<alloc::alloc::Global>+0x83
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0xb8e
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::format::format_str+0x199
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0xac8
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0x6e8
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::format::format_unsigned_impl+0x1
+   0.05%    0.05%        2  ticklog_rtrb_block!core::num::imp::flt2dec::strategy::grisu::format_shortest_opt+0x102
+   0.05%    0.05%        2  ticklog_rtrb_block!alloc::string::impl$63::write_str+0x45
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::fmt_u64+0x0
+   0.05%    0.05%        2  ticklog_rtrb_block!core::fmt::num::imp::impl$15::fmt+0x57
+   0.05%    0.05%        2  ticklog_rtrb_block!core::num::imp::flt2dec::strategy::grisu::format_shortest_opt+0x69
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::format::format_unsigned_impl+0x3be
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0x6fa
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x1235
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0x14a3
+   0.05%    0.05%        2  ticklog_rtrb_block!alloc::string::impl$63::write_str+0x4a
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0xeaa
+   0.05%    0.05%        2  ntdll!RtlFreeHeap+0x639
+   0.05%    0.05%        2  ntdll!RtlDelayExecution+0x5
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x121b
+   0.05%    0.05%        2  ticklog_rtrb_block!core::fmt::Formatter::pad_integral+0x8a
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0x19b5
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0xdfe
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0x10d2
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x18cb
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0x128d
+   0.05%    0.05%        2  ntdll!RtlFreeHeap+0xc2
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0xbd5
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0xb19
+   0.05%    0.05%        2  ntdll!RtlFreeHeap+0x61
+   0.05%    0.05%        2  ntdll!RtlFreeHeap+0x1c7
+   0.05%    0.05%        2  VCRUNTIME140!_NLG_Return2+0x400
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::format::format_str+0x164
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::format::format_with_spec+0xa
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x18de
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::format::format_with_spec+0x1e
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x1970
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x1780
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0x6b2
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0xb41
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x179d
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0xaa4
+   0.05%    0.05%        2  ticklog_rtrb_block!core::num::imp::flt2dec::strategy::grisu::format_shortest_opt+0xdd
+   0.05%    0.05%        2  VCRUNTIME140!memset+0x13e
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::format::format_str+0x1
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x120f
+   0.05%    0.05%        2  VCRUNTIME140!_NLG_Return2+0x433
+   0.05%    0.05%        2  ticklog_rtrb_block!alloc::fmt::format::format_inner+0x9d
+   0.05%    0.05%        2  ticklog_rtrb_block!alloc::string::impl$63::write_str+0x5
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::format::format_with_spec+0x9
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0x1998
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::format::format_float_impl+0xe3
+   0.05%    0.05%        2  ticklog_rtrb_block!core::fmt::impl$12::pad_integral::write_prefix+0x5d
+   0.05%    0.05%        2  ticklog_rtrb_block!alloc::raw_vec::impl$4::reserve::do_reserve_and_handle<alloc::alloc::Global>+0x59
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0x10fd
+   0.05%    0.05%        2  ticklog_rtrb_block!alloc::fmt::format::format_inner+0x0
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::format::format_with_spec+0x2e
+   0.05%    7.24%        2  ticklog_rtrb_block!core::fmt::num::imp::impl$15::fmt+0x106
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0xd6a
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0x11df
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0xfa4
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0xbc6
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x1932
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0x10c0
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0xb3c
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0xab6
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0xb87
+   0.05%    0.05%        2  ntdll!RtlFreeHeap+0x293
+   0.05%    0.05%        2  ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x18b4
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0xb15
+   0.05%    0.05%        2  ticklog_rtrb_block!core::num::imp::flt2dec::strategy::grisu::format_shortest_opt+0x380
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::drain::drain_ring+0xaad
+   0.05%    0.05%        2  ticklog_rtrb_block!ticklog::macros::dispatch::closure$0::closure$0<ticklog_cross_lang_harness::impl$2::batch_string::closure_env$0>+0x44
+   0.05%    0.05%        2  VCRUNTIME140!_NLG_Return2+0x487
+   0.05%    0.05%        2  ntdll!RtlAllocateHeap+0x17b1
+   0.05%    0.05%        2  VCRUNTIME140!_NLG_Return2+0x3ee
+   0.05%    0.05%        2  ticklog_rtrb_block!core::str::lossy::impl$4::next+0x2
+   0.05%    8.18%        2  ntdll!RtlAllocateHeap+0xbf4
+   0.05%    0.05%        2  ticklog_rtrb_block!core::fmt::write+0x1e
+   0.05%    0.05%        2  ntdll!RtlFreeHeap+0x87
+   0.05%    0.05%        2  ticklog_rtrb_block!core::fmt::num::imp::impl$15::fmt+0x13
+
+== threads (sorted by thread cpu time) ==
+    cpu_ms     cpu%   samples     samp%  thread
+   41484.4   50.31%      1974   50.31%  ticklog-drain            (tid 1012)
+          1.5% of samples  KERNEL32!GetProcessHeap+0x0
+          1.3% of samples  ntdll!RtlAllocateHeap+0x19ac
+          1.3% of samples  ntdll!RtlAllocateHeap+0x186d
+          1.3% of samples  ntdll!RtlFreeHeap+0x183
+          1.2% of samples  ntdll!RtlFreeHeap+0xf8
+   18750.0   22.74%       961   24.49%  tid_14048                (tid 14048)
+         91.1% of samples  ntdll!NtDelayExecution+0x14
+          1.9% of samples  ntdll!RtlDelayExecution+0x34
+          0.8% of samples  KERNEL32!SwitchToThread+0x0
+          0.2% of samples  ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0xe63
+          0.2% of samples  KERNELBASE!SwitchToThread+0x0
+   11500.0   13.95%       441   11.24%  tid_18824                (tid 18824)
+         93.9% of samples  ntdll!NtDelayExecution+0x14
+          2.3% of samples  ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x872
+          1.1% of samples  ntdll!RtlDelayExecution+0x34
+          0.9% of samples  KERNEL32!SwitchToThread+0x0
+          0.2% of samples  VCRUNTIME140!memset+0x13e
+   10640.6   12.91%       543   13.84%  tid_8068                 (tid 8068)
+         87.1% of samples  ntdll!NtDelayExecution+0x14
+          2.4% of samples  ntdll!RtlDelayExecution+0x34
+          0.6% of samples  KERNEL32!SwitchToThread+0x0
+          0.4% of samples  ntdll!RtlDelayExecution+0x0
+          0.4% of samples  KERNELBASE!SwitchToThread+0x0
+      31.2    0.04%         2    0.05%  tid_14924                (tid 14924)
+        100.0% of samples  ntdll!ZwWaitForWorkViaWorkerFactory+0x14
+      31.2    0.04%         2    0.05%  tid_17284                (tid 17284)
+        100.0% of samples  ntdll!ZwWaitForWorkViaWorkerFactory+0x14
+      15.6    0.02%         1    0.03%  main                     (tid 1588)
+        100.0% of samples  ntdll!ZwWriteFile+0x14
+
+== top stacks (top 40) ==
+
+[22.30%] ntdll!NtDelayExecution+0x14<-ntdll!RtlDelayExecution+0x34<-KERNELBASE!SwitchToThread+0x1b<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1366<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[12.05%] ntdll!NtDelayExecution+0x14<-ntdll!RtlDelayExecution+0x34<-KERNELBASE!SwitchToThread+0x1b<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1dd6<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[10.55%] ntdll!NtDelayExecution+0x14<-ntdll!RtlDelayExecution+0x34<-KERNELBASE!SwitchToThread+0x1b<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x896<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.56%] ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1da9<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.46%] ntdll!RtlDelayExecution+0x34<-KERNELBASE!SwitchToThread+0x1b<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1366<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.38%] ticklog_rtrb_block!ticklog::drain::drain_ring+0x1116<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.36%] ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1335<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.36%] VCRUNTIME140!_NLG_Return2+0x50a<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x10f6<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.33%] ntdll!NtDelayExecution+0x14<-ntdll!RtlDelayExecution+0x34<-KERNELBASE!SwitchToThread+0x1b<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x1e5<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.33%] ntdll!RtlDelayExecution+0x34<-KERNELBASE!SwitchToThread+0x1b<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1dd6<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.25%] ticklog_rtrb_block!ticklog::drain::drain_ring+0x10eb<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.25%] ticklog_rtrb_block!core::str::lossy::impl$4::next+0x40<-ticklog_rtrb_block!alloc::string::String::from_utf8_lossy+0x3e<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x1866<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.25%] ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x872<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.25%] VCRUNTIME140!_NLG_Return2+0x511<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x10f6<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.20%] ticklog_rtrb_block!core::fmt::write+0x43<-ticklog_rtrb_block!alloc::fmt::format::format_inner+0x12f<-ticklog_rtrb_block!ticklog::format::format_unsigned_impl+0xb7<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x130d<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.20%] KERNEL32!GetProcessHeap+0x0<-ticklog_rtrb_block!std::sys::alloc::windows::process_heap_alloc+0x14<-ticklog_rtrb_block!alloc::raw_vec::RawVecInner::finish_grow<alloc::alloc::Global>+0x63<-ticklog_rtrb_block!alloc::raw_vec::impl$4::reserve::do_reserve_and_handle<alloc::alloc::Global>+0x42<-ticklog_rtrb_block!alloc::string::impl$63::write_str+0x5d<-ticklog_rtrb_block!core::fmt::num::imp::impl$15::fmt+0x106<-ticklog_rtrb_block!core::fmt::write+0x15e<-ticklog_rtrb_block!alloc::fmt::format::format_inner+0x12f<-ticklog_rtrb_block!ticklog::format::format_unsigned_impl+0xb7<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x130d<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.20%] KERNEL32!SwitchToThread+0x0<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x1366<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.20%] ntdll!RtlAllocateHeap+0x186d<-ntdll!RtlAllocateHeap+0xbf4<-ntdll!RtlAllocateHeap+0xabb<-ticklog_rtrb_block!ticklog::format::format_str+0x187<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x12c8<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.20%] VCRUNTIME140!memmove+0x699<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x175<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.18%] ntdll!RtlFreeHeap+0xf8<-ticklog_rtrb_block!ticklog::format::format_str+0x29e<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x1361<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.18%] ntdll!RtlAllocateHeap+0x19ac<-ntdll!RtlAllocateHeap+0xbf4<-ntdll!RtlAllocateHeap+0xabb<-ticklog_rtrb_block!ticklog::format::format_str+0x187<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x189d<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.18%] ntdll!RtlAllocateHeap+0x19ac<-ntdll!RtlAllocateHeap+0xbf4<-ntdll!RtlAllocateHeap+0xabb<-ticklog_rtrb_block!alloc::raw_vec::RawVecInner::finish_grow<alloc::alloc::Global>+0x63<-ticklog_rtrb_block!alloc::raw_vec::impl$4::reserve::do_reserve_and_handle<alloc::alloc::Global>+0x42<-ticklog_rtrb_block!alloc::string::impl$63::write_str+0x5d<-ticklog_rtrb_block!core::fmt::num::imp::impl$15::fmt+0x106<-ticklog_rtrb_block!core::fmt::write+0x15e<-ticklog_rtrb_block!alloc::fmt::format::format_inner+0x12f<-ticklog_rtrb_block!ticklog::format::format_unsigned_impl+0xb7<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x130d<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.15%] ntdll!RtlAllocateHeap+0x186d<-ntdll!RtlAllocateHeap+0xbf4<-ntdll!RtlAllocateHeap+0xabb<-ticklog_rtrb_block!alloc::raw_vec::RawVecInner::finish_grow<alloc::alloc::Global>+0x63<-ticklog_rtrb_block!alloc::raw_vec::impl$4::reserve::do_reserve_and_handle<alloc::alloc::Global>+0x42<-ticklog_rtrb_block!alloc::string::impl$63::write_str+0x5d<-ticklog_rtrb_block!core::fmt::num::imp::impl$15::fmt+0x106<-ticklog_rtrb_block!core::fmt::write+0x15e<-ticklog_rtrb_block!alloc::fmt::format::format_inner+0x12f<-ticklog_rtrb_block!ticklog::format::format_unsigned_impl+0xb7<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x130d<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.15%] ticklog_rtrb_block!ticklog::drain::drain_ring+0x15a5<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.15%] ticklog_rtrb_block!ticklog::drain::drain_ring+0x10ab<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.15%] ticklog_rtrb_block!ticklog::drain::drain_ring+0x10b9<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.15%] ntdll!RtlFreeHeap+0x183<-ticklog_rtrb_block!ticklog::format::format_str+0x29e<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x1361<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.15%] ntdll!RtlFreeHeap+0x183<-ticklog_rtrb_block!ticklog::format::format_unsigned_impl+0x3b4<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x1801<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.15%] ticklog_rtrb_block!core::num::imp::flt2dec::strategy::grisu::format_shortest_opt+0x254<-ticklog_rtrb_block!core::fmt::float::float_to_decimal_common_shortest<f64>+0x1ed<-ticklog_rtrb_block!core::fmt::write+0x15e<-ticklog_rtrb_block!alloc::fmt::format::format_inner+0x12f<-ticklog_rtrb_block!ticklog::format::format_float_impl+0xdb<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x1801<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.15%] ticklog_rtrb_block!core::fmt::float::float_to_decimal_common_shortest<f64>+0x1f8<-ticklog_rtrb_block!core::fmt::write+0x15e<-ticklog_rtrb_block!alloc::fmt::format::format_inner+0x12f<-ticklog_rtrb_block!ticklog::format::format_float_impl+0xdb<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x1801<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.15%] ntdll!RtlFreeHeap+0xf4<-ticklog_rtrb_block!ticklog::format::format_str+0x29e<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x12c8<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.15%] ticklog_rtrb_block!core::num::imp::flt2dec::strategy::grisu::format_shortest_opt+0x265<-ticklog_rtrb_block!core::fmt::float::float_to_decimal_common_shortest<f64>+0x1ed<-ticklog_rtrb_block!core::fmt::write+0x15e<-ticklog_rtrb_block!alloc::fmt::format::format_inner+0x12f<-ticklog_rtrb_block!ticklog::format::format_float_impl+0xdb<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x1801<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.13%] ticklog_rtrb_block!alloc::fmt::format::format_inner+0x5c<-ticklog_rtrb_block!ticklog::format::format_unsigned_impl+0xb7<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x1801<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.13%] VCRUNTIME140!_NLG_Return2+0x4f7<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x10f6<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.13%] ntdll!RtlAllocateHeap+0x136d<-ntdll!RtlAllocateHeap+0xbf4<-ntdll!RtlAllocateHeap+0xabb<-ticklog_rtrb_block!alloc::raw_vec::RawVecInner::finish_grow<alloc::alloc::Global>+0x63<-ticklog_rtrb_block!alloc::raw_vec::impl$4::reserve::do_reserve_and_handle<alloc::alloc::Global>+0x42<-ticklog_rtrb_block!alloc::string::impl$63::write_str+0x5d<-ticklog_rtrb_block!core::fmt::num::imp::impl$15::fmt+0x106<-ticklog_rtrb_block!core::fmt::write+0x15e<-ticklog_rtrb_block!alloc::fmt::format::format_inner+0x12f<-ticklog_rtrb_block!ticklog::format::format_unsigned_impl+0xb7<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x130d<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.13%] ticklog_rtrb_block!ticklog::drain::drain_ring+0xbce<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.13%] ticklog_rtrb_block!ticklog::format::format_unsigned_impl+0xbb<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x130d<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.13%] ntdll!RtlDelayExecution+0x34<-KERNELBASE!SwitchToThread+0x1b<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >+0x896<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog_cross_lang_harness::measure_config::closure_env$0,tuple$<alloc::vec::Vec<f64,alloc::alloc::Global>,array$<u64,8> > >,tuple$<> >+0x9b<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.13%] ticklog_rtrb_block!ticklog::format::format_with_spec+0x18c<-ticklog_rtrb_block!ticklog::format::format_unsigned_impl+0x39a<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x130d<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
+
+[ 0.13%] ntdll!RtlFreeHeap+0xf4<-ticklog_rtrb_block!ticklog::format::format_unsigned_impl+0x3b4<-ticklog_rtrb_block!ticklog::drain::drain_ring+0x130d<-ticklog_rtrb_block!ticklog::drain::Drain::poll_once+0xfc<-ticklog_rtrb_block!std::sys::backtrace::__rust_begin_short_backtrace<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >+0x15b<-ticklog_rtrb_block!core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<ticklog::builder::__configure_rt::closure_env$1<ref$<str$> >,tuple$<> >,tuple$<> >+0xbf<-ticklog_rtrb_block!std::sys::thread::windows::impl$0::new::thread_start+0x1ce<-KERNEL32!BaseThreadInitThunk+0x17<-ntdll!RtlUserThreadStart+0x2c
